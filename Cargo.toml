@@ -1,0 +1,21 @@
+[package]
+name = "xum1541"
+version = "0.1.0"
+edition = "2021"
+description = "Rust driver for XUM1541 USB device"
+license = "GPL-3.0"
+
+[lib]
+name = "xum1541"
+path = "src/lib.rs"
+
+[dependencies]
+rusb = "0.9"
+thiserror = "2.0"
+tracing = "0.1"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
