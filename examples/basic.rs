@@ -16,6 +16,9 @@ fn code() -> Result<()> {
     let mut builder = BusBuilder::new().context(context);
     let mut bus = builder.build()?;
 
+    // Initialize the bus
+    bus.initialize()?;
+
     // Print out the device info
     let info = bus.device_info();
     println!("XUM1541 information:");

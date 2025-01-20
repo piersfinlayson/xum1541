@@ -36,9 +36,10 @@ use xum1541::{BusBuilder, Error};
 fn main() -> Result<(), Error> {
     // Connect to the XUM1541 device 
     let mut bus = BusBuilder::new().build()?;
-    let info = bus.device_info();
-    println!("Got device info:\n{:?}", info.unwrap());
-    
+
+    // Initialize the bus
+    bus.initialize()?;
+
     // Reset the IEC
     bus.reset()?;
 

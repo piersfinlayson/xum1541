@@ -175,6 +175,10 @@ impl Bus {
         }
     }
 
+    pub fn initialize(&mut self) -> Result<()> {
+        self.device.init()
+    }
+
     /// Get the underlying Device context - may be used to share with other
     /// rusb instances, and to set the log level of rusb
     pub fn device_context(&self) -> &Context {
