@@ -1,11 +1,11 @@
 #[allow(unused_imports)]
 use crate::constants::*;
-use crate::Xum1541Error::{self, *};
-use crate::DeviceAccessKind::*;
 use crate::error::InternalError;
+use crate::DeviceAccessKind::*;
+use crate::Xum1541Error::{self, *};
 
 #[allow(unused_imports)]
-use log::{error, warn, info, debug, trace};
+use log::{debug, error, info, trace, warn};
 use rusb::Device as RusbDevice;
 use rusb::DeviceHandle as RusbDeviceHandle;
 use rusb::{constants, Context, DeviceDescriptor, UsbContext};
@@ -195,19 +195,23 @@ impl Device {
         let err = match found_any_xum1541 {
             true => {
                 error!("No matching XUM1541 device found, but found non-matching serial");
-                DeviceAccess { kind: SerialMismatch {
-                    vid: XUM1541_VID,
-                    pid: XUM1541_PID,
-                    actual: found_serial_nums,
-                    expected: serial_num,
-                }}
+                DeviceAccess {
+                    kind: SerialMismatch {
+                        vid: XUM1541_VID,
+                        pid: XUM1541_PID,
+                        actual: found_serial_nums,
+                        expected: serial_num,
+                    },
+                }
             }
             false => {
                 error!("No suitable XUM1541 device found");
-                DeviceAccess { kind: NotFound {
-                    vid: XUM1541_VID,
-                    pid: XUM1541_PID,
-                }}
+                DeviceAccess {
+                    kind: NotFound {
+                        vid: XUM1541_VID,
+                        pid: XUM1541_PID,
+                    },
+                }
             }
         };
         Err(err)
@@ -275,11 +279,11 @@ impl Device {
                         return Err(error);
                     }
                     e => {
-                        // Hit some sort of processing error - we'll treat this as a non-failure mode 
+                        // Hit some sort of processing error - we'll treat this as a non-failure mode
                         warn!("Failed to read debug info from device: {}", e);
                         None
-                    } 
-                }
+                    }
+                },
             };
         } else {
             debug!("Firmware earlier than 8 doesn't support extra debug info");
@@ -320,7 +324,12 @@ impl Device {
         u16::from(buf[2]) << 8 | u16::from(buf[1])
     }
 
-    pub fn control_write(&self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Xum1541Error> {
+    pub fn control_write(
+        &self,
+        request: u8,
+        value: u16,
+        buffer: &[u8],
+    ) -> Result<(), Xum1541Error> {
         trace!(
             "Device::control_write request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
@@ -351,7 +360,12 @@ impl Device {
     }
 
     /// Implements xum1541_control_mg - reading type
-    pub fn control_read(&self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize, Xum1541Error> {
+    pub fn control_read(
+        &self,
+        request: u8,
+        value: u16,
+        buffer: &mut [u8],
+    ) -> Result<usize, Xum1541Error> {
         trace!(
             "Device::control_read request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
@@ -441,7 +455,7 @@ impl Device {
                         }
                         num => {
                             warn!("Unexpected debug status {}", num);
-                        break Err(Communication {
+                            break Err(Communication {
                                 message: format!("Unexpected error from device {}", num),
                             });
                         }
@@ -660,12 +674,17 @@ impl Device {
 
         // Verify firmware version
         if info.firmware_version < MIN_FW_VERSION {
-            return Err(DeviceAccess { kind: FirmwareVersion {
-                actual: info.firmware_version,
-                expected: MIN_FW_VERSION,
-            }});
+            return Err(DeviceAccess {
+                kind: FirmwareVersion {
+                    actual: info.firmware_version,
+                    expected: MIN_FW_VERSION,
+                },
+            });
         } else if info.firmware_version > CUR_FW_VERSION {
-            warn!("XUM1541 device has later firmware {} than expected {CUR_FW_VERSION}", info.firmware_version);
+            warn!(
+                "XUM1541 device has later firmware {} than expected {CUR_FW_VERSION}",
+                info.firmware_version
+            );
         }
 
         Ok(info)
@@ -699,7 +718,11 @@ impl Device {
     }
 
     /// Read a single debug command
-    fn read_debug_command(&mut self, cmd: u8, info_buf: &mut [u8]) -> Result<String, InternalError> {
+    fn read_debug_command(
+        &mut self,
+        cmd: u8,
+        info_buf: &mut [u8],
+    ) -> Result<String, InternalError> {
         trace!(
             "Device::read_debug_command cmd {cmd} info_buf.len() {}",
             info_buf.len()
@@ -769,10 +792,12 @@ mod tests {
         let result = Device::new(99);
         assert!(matches!(
             result,
-            Err(DeviceAccess { kind: NotFound {
-                vid: XUM1541_VID,
-                pid: XUM1541_PID
-            }})
+            Err(DeviceAccess {
+                kind: NotFound {
+                    vid: XUM1541_VID,
+                    pid: XUM1541_PID
+                }
+            })
         ));
     }
 }

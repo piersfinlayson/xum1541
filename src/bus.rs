@@ -1,11 +1,11 @@
 #[allow(unused_imports)]
 use crate::constants::*;
-use crate::{Device, DeviceInfo};
 #[allow(unused_imports)]
 use crate::Xum1541Error::{self, *};
+use crate::{Device, DeviceInfo};
 
 #[allow(unused_imports)]
-use log::{error, warn, info, debug, trace};
+use log::{debug, error, info, trace, warn};
 use rusb::{Context, UsbContext};
 use std::time::Duration;
 

@@ -4,10 +4,10 @@ use xum1541::Xum1541Error;
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("xum1541 error: {error}")]
-    Xum1541Error{ error: Xum1541Error},
-    
+    Xum1541Error { error: Xum1541Error },
+
     #[error("App error: {message}")]
-    App{message: String},
+    App { message: String },
 }
 
 impl From<Xum1541Error> for AppError {

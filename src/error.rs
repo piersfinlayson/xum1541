@@ -1,12 +1,12 @@
 use thiserror::Error;
 
 /// Error type for the xum1541 crate
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum Xum1541Error {
     /// Errors accessing the USB device
     /// Note that permission problems are explicitly handled in the DeviceAccessKind
-    #[error("USB error while attempting to commuicate with the XUM1541: {error}")]
-    Usb { error: rusb::Error },
+    #[error("USB error while attempting to commuicate with the XUM1541: {0}")]
+    Usb(#[from] rusb::Error),
 
     /// Failure in initializing the XUM1541 device
     #[error("XUM1541 device initialization failed: {message}")]
@@ -22,9 +22,7 @@ pub enum Xum1541Error {
 
     /// DeviceAccess holds a variety errors relating to accessing the XUM1541
     #[error("{kind}")]
-    DeviceAccess {
-        kind: DeviceAccessKind,
-    },
+    DeviceAccess { kind: DeviceAccessKind },
 
     /// Invalid arguments passed to the xum1541 library
     #[error("xum1541 library called with invalid arguments: {message}")]
@@ -33,14 +31,11 @@ pub enum Xum1541Error {
 
 /// Used to differentiate between different types of problems accessing the
 /// XUM1541 device
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum DeviceAccessKind {
     #[error("XUM1541 device {vid:04x}/{pid:04x} not found - is it connected and do you have permissions to access it?")]
-    NotFound {
-        vid: u16,
-        pid: u16,
-    },
-    
+    NotFound { vid: u16, pid: u16 },
+
     #[error("XUM1541 device found, but non-matching serial numbers. Found {actual:?}, was looking for {expected}")]
     SerialMismatch {
         vid: u16,
@@ -49,26 +44,13 @@ pub enum DeviceAccessKind {
         expected: u8,
     },
 
-    #[error("XUM1541 device has unsupported firmware version {actual}, expected minimum {expected}")]
-    FirmwareVersion {
-        actual: u8,
-        expected: u8,
-    },
+    #[error(
+        "XUM1541 device has unsupported firmware version {actual}, expected minimum {expected}"
+    )]
+    FirmwareVersion { actual: u8, expected: u8 },
 
     #[error("Hit USB permissions error while attempting to access XUM1541 device.  Are you sure you have suitable permissions?  You may need to reconfigure udev rules in /etc/udev/rules.d/.")]
     Permission,
-}
-
-/// Map rusb:Error to an Xum1541Error
-/// We explicitly map a permission problem to a specific error - all others
-/// are mapped to the generic Usb error
-impl From<rusb::Error> for Xum1541Error {
-    fn from(error: rusb::Error) -> Self {
-        match error {
-            rusb::Error::Access => Xum1541Error::DeviceAccess { kind: DeviceAccessKind::Permission },
-            other => Xum1541Error::Usb { error: other },
-        }
-    }
 }
 
 /// Used for errors which must remain internal to the xum1541 crate
@@ -95,6 +77,8 @@ impl From<Xum1541Error> for InternalError {
 /// Map rusb:Error to an Xum1541Error, wrapped in an InternalError::PublicError type
 impl From<rusb::Error> for InternalError {
     fn from(error: rusb::Error) -> Self {
-        InternalError::PublicError { error: error.into() }
+        InternalError::PublicError {
+            error: error.into(),
+        }
     }
 }
