@@ -66,3 +66,11 @@ pub const CAP_NIB: u8 = 0x02; // parallel nibbler
 pub const CAP_NIB_SRQ: u8 = 0x04; // 1571 serial nibbler
 pub const CAP_IEEE488: u8 = 0x08; // GPIB (PET) parallel bus
 pub const CAP_TAP: u8 = 0x10; // 153x tape support
+
+/// Minimum and maximum disk drive numbers
+pub const MIN_DEVICE_NUM: u8 = 8;
+pub const MAX_DEVICE_NUM: u8 = 30;
+
+/// Minimum and maximum disk drive channel numbers
+pub const MIN_CHANNEL_NUM: u8 = 0;
+pub const MAX_CHANNEL_NUM: u8 = 15;

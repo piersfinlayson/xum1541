@@ -4,7 +4,7 @@
 ///
 /// basic.rs may be a better example to start with, as it is provides better
 /// error handling.
-use xum1541::{BusBuilder, Xum1541Error};
+use xum1541::{BusBuilder, Xum1541Error, DeviceChannel};
 
 fn main() -> Result<(), Xum1541Error> {
     // Connect to the XUM1541 device
@@ -17,7 +17,7 @@ fn main() -> Result<(), Xum1541Error> {
     bus.reset()?;
 
     // Instuct device 8 to talk using channel 15
-    bus.talk(8, 15)?;
+    bus.talk(DeviceChannel::new(8, 15)?)?;
 
     // Read up to 256 bytes of data from the drive
     let mut data = vec![0u8; 256];

@@ -3,6 +3,7 @@ use crate::constants::*;
 #[allow(unused_imports)]
 use crate::Xum1541Error::{self, *};
 use crate::{Device, DeviceInfo};
+use crate::buscmd::{BusMode, BusCommand, DeviceChannel};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -10,145 +11,6 @@ use rusb::{Context, UsbContext};
 use std::time::Duration;
 
 const DEFAULT_BUS_TIMEOUT: Duration = Duration::from_secs(60);
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DeviceChannel {
-    pub device: u8,
-    pub channel: u8,
-}
-
-#[derive(Debug)]
-enum BusMode {
-    Talking(DeviceChannel),
-    Listening(DeviceChannel),
-    Idle,
-}
-
-impl Default for BusMode {
-    fn default() -> Self {
-        BusMode::Idle
-    }
-}
-
-/// Represents the different types of commands that can be sent on the bus
-/// The other commands (Init, Reset, ClockSet, Wait and Shutdown) are not bus
-/// commands (but are handled, where appropriate, by Device).  Read and Write
-/// are special cases, and again handled by Device.
-#[derive(Debug)]
-enum BusCommand {
-    Talk { device: u8, channel: u8 },
-    Listen { device: u8, channel: u8 },
-    Untalk,
-    Unlisten,
-    Open { device: u8, channel: u8 },
-    Close { device: u8, channel: u8 },
-}
-
-impl BusCommand {
-    /// Gets the protocol flags for this command
-    fn protocol(&self) -> u8 {
-        match self {
-            BusCommand::Talk { .. } => PROTO_CBM | PROTO_WRITE_ATN | PROTO_WRITE_TALK,
-            _ => PROTO_CBM | PROTO_WRITE_ATN,
-        }
-    }
-
-    /// Gets the command bytes to be sent on the bus
-    fn command_bytes(&self) -> Vec<u8> {
-        match self {
-            BusCommand::Talk { device, channel } => vec![0x40 | device, 0x60 | channel],
-            BusCommand::Listen { device, channel } => vec![0x20 | device, 0x60 | channel],
-            BusCommand::Untalk => vec![0x5f],
-            BusCommand::Unlisten => vec![0x3f],
-            BusCommand::Open { device, channel } => vec![0x20 | device, 0xf0 | channel],
-            BusCommand::Close { device, channel } => vec![0x20 | device, 0xe0 | channel],
-        }
-    }
-
-    /// Gets the trace message for this command
-    fn trace_message(&self) -> &'static str {
-        match self {
-            BusCommand::Talk { .. } => "Entered Bus::talk",
-            BusCommand::Listen { .. } => "Entered Bus::listen",
-            BusCommand::Untalk => "Entered Bus::untalk",
-            BusCommand::Unlisten => "Entered Bus::unlisten",
-            BusCommand::Open { .. } => "Entered Bus::open",
-            BusCommand::Close { .. } => "Entered Bus::close",
-        }
-    }
-}
-
-impl BusCommand {
-    fn conflicts_with(&self, current_mode: &BusMode) -> Option<&'static str> {
-        match (self, current_mode) {
-            // Talk/Listen core mode conflicts
-            (BusCommand::Talk { .. }, BusMode::Talking(_)) => {
-                Some("Setting new talker while device is still talking")
-            }
-            (BusCommand::Talk { .. }, BusMode::Listening(_)) => {
-                Some("Setting talker while device is listening")
-            }
-            (BusCommand::Listen { .. }, BusMode::Talking(_)) => {
-                Some("Setting listener while device is talking")
-            }
-            (BusCommand::Listen { .. }, BusMode::Listening(_)) => {
-                Some("Setting new listener while device is still listening")
-            }
-
-            // Clear mode conflicts
-            (BusCommand::Untalk, BusMode::Listening(_)) => {
-                Some("Clearing talker while device is listening")
-            }
-            (BusCommand::Untalk, BusMode::Idle) => Some("Clearing talker when bus is idle"),
-            (BusCommand::Unlisten, BusMode::Talking(_)) => {
-                Some("Clearing listener while device is talking")
-            }
-            (BusCommand::Unlisten, BusMode::Idle) => Some("Clearing listener when bus is idle"),
-
-            // Open/Close require device to be in listen mode
-            (BusCommand::Open { .. } | BusCommand::Close { .. }, BusMode::Talking(_)) => {
-                Some("Cannot open/close while device is talking")
-            }
-            (BusCommand::Open { .. } | BusCommand::Close { .. }, BusMode::Idle) => {
-                Some("Cannot open/close when no device is listening")
-            }
-            _ => None,
-        }
-    }
-
-    fn requires_listen_first(&self) -> bool {
-        matches!(self, BusCommand::Open { .. } | BusCommand::Close { .. })
-    }
-
-    fn next_mode(&self) -> BusMode {
-        match self {
-            BusCommand::Talk { device, channel } => BusMode::Talking(DeviceChannel {
-                device: *device,
-                channel: *channel,
-            }),
-            BusCommand::Listen { device, channel } => BusMode::Listening(DeviceChannel {
-                device: *device,
-                channel: *channel,
-            }),
-            BusCommand::Untalk | BusCommand::Unlisten => BusMode::Idle,
-            // Open and Close maintain the listening mode
-            BusCommand::Open { .. } | BusCommand::Close { .. } => self
-                .device_channel()
-                .map(|dc| BusMode::Listening(dc))
-                .unwrap_or(BusMode::Idle),
-        }
-    }
-
-    fn device_channel(&self) -> Option<DeviceChannel> {
-        match *self {
-            BusCommand::Talk { device, channel }
-            | BusCommand::Listen { device, channel }
-            | BusCommand::Open { device, channel }
-            | BusCommand::Close { device, channel } => Some(DeviceChannel { device, channel }),
-            _ => None,
-        }
-    }
-}
 
 /// The Bus struct is the main interface for accessing Commodore disk drives.
 /// It provides key bus-level primitives, such as
@@ -205,13 +67,13 @@ impl Bus {
     }
 
     // Instruct a drive to talk
-    pub fn talk(&mut self, device: u8, channel: u8) -> Result<(), Xum1541Error> {
-        self.execute_command(BusCommand::Talk { device, channel })
+    pub fn talk(&mut self, dc: DeviceChannel) -> Result<(), Xum1541Error> {
+        self.execute_command(BusCommand::Talk(dc))
     }
 
     // Instruct a drive to listen
-    pub fn listen(&mut self, device: u8, channel: u8) -> Result<(), Xum1541Error> {
-        self.execute_command(BusCommand::Listen { device, channel })
+    pub fn listen(&mut self, dc: DeviceChannel) -> Result<(), Xum1541Error> {
+        self.execute_command(BusCommand::Listen(dc))
     }
 
     // Instruct a drive to stop talking
@@ -226,13 +88,13 @@ impl Bus {
 
     /// Open a file on a drive and channel
     /// Normally followed by write(filename) and then unlisten()
-    pub fn open(&mut self, device: u8, channel: u8) -> Result<(), Xum1541Error> {
-        self.execute_command(BusCommand::Open { device, channel })
+    pub fn open(&mut self, dc: DeviceChannel) -> Result<(), Xum1541Error> {
+        self.execute_command(BusCommand::Open(dc))
     }
 
     /// Close a file on a drive and channel
-    pub fn close(&mut self, device: u8, channel: u8) -> Result<(), Xum1541Error> {
-        self.execute_command(BusCommand::Close { device, channel })
+    pub fn close(&mut self, dc: DeviceChannel) -> Result<(), Xum1541Error> {
+        self.execute_command(BusCommand::Close(dc))
     }
 
     /// Read data from the bus (from a drive that is in talk mode)
@@ -400,12 +262,13 @@ impl Bus {
 
     /// Execute a bus command
     fn execute_command(&mut self, command: BusCommand) -> Result<(), Xum1541Error> {
+        trace!("Entered Bus::execute_command command {command}");
         // Handle open/close requiring listen mode first
         if command.requires_listen_first() {
-            match self.mode {
-                BusMode::Listening(dev) => {
-                    if let Some(cmd_dev) = command.device_channel() {
-                        if dev != cmd_dev {
+            match &self.mode {
+                BusMode::Listening(dc) => {
+                    if let Some(cmd_dc) = command.device_channel() {
+                        if *dc != cmd_dc {
                             warn!("Opening/closing channel on different device than currently listening");
                         }
                     }
@@ -416,9 +279,9 @@ impl Bus {
 
         // Check for mode conflicts
         if let Some(warning) = command.conflicts_with(&self.mode) {
-            match self.mode {
-                BusMode::Talking(dev) | BusMode::Listening(dev) => {
-                    warn!("{} {}:{}", warning, dev.device, dev.channel);
+            match &self.mode {
+                BusMode::Talking(dc) | BusMode::Listening(dc) => {
+                    warn!("{} {}:{}", warning, dc.device(), dc.channel());
                 }
                 BusMode::Idle => {
                     warn!("{}", warning);

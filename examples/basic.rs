@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
 use rusb::UsbContext;
-use xum1541::BusBuilder;
+use xum1541::{BusBuilder, DeviceChannel};
 mod common;
 use common::AppError;
 
@@ -47,7 +47,7 @@ fn code() -> Result<(), AppError> {
     bus.reset()?;
 
     // Tell the drive on device 8 to talk using channel 15
-    bus.talk(8, 15)?;
+    bus.talk(DeviceChannel::new(8, 15)?)?;
 
     // Read up to 256 bytes of data (this will read drive status)
     let mut data = vec![0u8; 256];
