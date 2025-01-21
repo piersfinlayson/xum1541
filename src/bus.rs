@@ -1,9 +1,11 @@
-use crate::device::{Device, DeviceInfo};
 #[allow(unused_imports)]
-use crate::{Error, Result};
-use crate::{CTRL_RESET, PROTO_CBM, PROTO_WRITE_ATN, PROTO_WRITE_TALK};
+use crate::constants::*;
+use crate::{Device, DeviceInfo};
 #[allow(unused_imports)]
-use log::{debug, error, info, trace, warn};
+use crate::Xum1541Error::{self, *};
+
+#[allow(unused_imports)]
+use log::{error, warn, info, debug, trace};
 use rusb::{Context, UsbContext};
 use std::time::Duration;
 
@@ -29,6 +31,9 @@ impl Default for BusMode {
 }
 
 /// Represents the different types of commands that can be sent on the bus
+/// The other commands (Init, Reset, ClockSet, Wait and Shutdown) are not bus
+/// commands (but are handled, where appropriate, by Device).  Read and Write
+/// are special cases, and again handled by Device.
 #[derive(Debug)]
 enum BusCommand {
     Talk { device: u8, channel: u8 },
@@ -176,7 +181,7 @@ impl Bus {
         }
     }
 
-    pub fn initialize(&mut self) -> Result<()> {
+    pub fn initialize(&mut self) -> Result<(), Xum1541Error> {
         trace!("Bus::initialize");
         self.device.init()
     }
@@ -193,45 +198,45 @@ impl Bus {
 
     /// Reset the IEC/IEEE-488 bus
     /// Will reboot all attached drives and reset the talk/listen state
-    pub fn reset(&mut self) -> Result<()> {
+    pub fn reset(&mut self) -> Result<(), Xum1541Error> {
         trace!("Entered Bus::reset");
         self.mode = BusMode::Idle;
         self.device.control_write(CTRL_RESET, 0, &[])
     }
 
     // Instruct a drive to talk
-    pub fn talk(&mut self, device: u8, channel: u8) -> Result<()> {
+    pub fn talk(&mut self, device: u8, channel: u8) -> Result<(), Xum1541Error> {
         self.execute_command(BusCommand::Talk { device, channel })
     }
 
     // Instruct a drive to listen
-    pub fn listen(&mut self, device: u8, channel: u8) -> Result<()> {
+    pub fn listen(&mut self, device: u8, channel: u8) -> Result<(), Xum1541Error> {
         self.execute_command(BusCommand::Listen { device, channel })
     }
 
     // Instruct a drive to stop talking
-    pub fn untalk(&mut self) -> Result<()> {
+    pub fn untalk(&mut self) -> Result<(), Xum1541Error> {
         self.execute_command(BusCommand::Untalk)
     }
 
     // Instruct a drive to stop listening
-    pub fn unlisten(&mut self) -> Result<()> {
+    pub fn unlisten(&mut self) -> Result<(), Xum1541Error> {
         self.execute_command(BusCommand::Unlisten)
     }
 
     /// Open a file on a drive and channel
     /// Normally followed by write(filename) and then unlisten()
-    pub fn open(&mut self, device: u8, channel: u8) -> Result<()> {
+    pub fn open(&mut self, device: u8, channel: u8) -> Result<(), Xum1541Error> {
         self.execute_command(BusCommand::Open { device, channel })
     }
 
     /// Close a file on a drive and channel
-    pub fn close(&mut self, device: u8, channel: u8) -> Result<()> {
+    pub fn close(&mut self, device: u8, channel: u8) -> Result<(), Xum1541Error> {
         self.execute_command(BusCommand::Close { device, channel })
     }
 
     /// Read data from the bus (from a drive that is in talk mode)
-    pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
+    pub fn read(&self, buf: &mut [u8]) -> Result<usize, Xum1541Error> {
         trace!("Entered Bus::read buf.len(): {}", buf.len());
 
         Self::validate_read_params(buf, None, false)?;
@@ -240,12 +245,12 @@ impl Bus {
     }
 
     /// Write data to the bus (to a drive that is in listen mode)
-    pub fn write(&self, buf: &[u8]) -> Result<usize> {
+    pub fn write(&self, buf: &[u8]) -> Result<usize, Xum1541Error> {
         trace!("Entered Bus::write");
         let size = buf.len();
         if size == 0 {
             warn!("Attempt to write 0 bytes");
-            return Err(Error::InvalidArgs {
+            return Err(Args {
                 message: format!("Attempt to write 0 bytes"),
             });
         }
@@ -268,7 +273,7 @@ impl Bus {
 
     /// Read data from the bus until either buf.len() bytes are read or pattern is matched
     /// Returns the number of bytes read (including the pattern if found)
-    pub fn read_until(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize> {
+    pub fn read_until(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Xum1541Error> {
         let size = buf.len();
         trace!(
             "Bus::read_until buf.len() {size} pattern.len() {}",
@@ -304,14 +309,14 @@ impl Bus {
 
     /// Read data from the bus until either size bytes are read or any byte from pattern is matched
     /// Returns the number of bytes read (including the matching byte if found)
-    pub fn read_until_any(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize> {
+    pub fn read_until_any(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Xum1541Error> {
         let size = buf.len();
         trace!(
             "Bus::read_until_any buf.len() {size} pattern.len() {}",
             pattern.len()
         );
         if buf.len() < size {
-            return Err(Error::InvalidArgs {
+            return Err(Args {
                 message: format!(
                     "Buffer length {} shorter than requested read size{}",
                     buf.len(),
@@ -344,7 +349,7 @@ impl Bus {
 /// Private functions for Bus
 impl Bus {
     /// Common helper function for reading a single byte
-    fn read_one_byte(&self) -> Result<Option<u8>> {
+    fn read_one_byte(&self) -> Result<Option<u8>, Xum1541Error> {
         trace!("Bus::read_one_byte");
         let mut temp = vec![0u8; 1];
         match self.device.read_data(PROTO_CBM, &mut temp) {
@@ -365,13 +370,13 @@ impl Bus {
         buf: &[u8],
         pattern_len: Option<usize>,
         check_pattern_size: bool,
-    ) -> Result<()> {
+    ) -> Result<(), Xum1541Error> {
         let size = buf.len();
         trace!("Bus::validate_read_params buf.len(): {size} pattern_len: {pattern_len:?} check_pattern_size: {check_pattern_size}");
 
         if size == 0 {
             warn!("Attempt to read 0 bytes");
-            return Err(Error::InvalidArgs {
+            return Err(Args {
                 message: format!("Attempted to read 0 bytes"),
             });
         }
@@ -379,14 +384,14 @@ impl Bus {
         if let Some(pattern_len) = pattern_len {
             if pattern_len == 0 {
                 warn!("Attempt to read match against empty pattern");
-                return Err(Error::InvalidArgs {
+                return Err(Args {
                     message: format!("Attempt to read match against empty pattern"),
                 });
             }
 
             if check_pattern_size && pattern_len > size {
                 warn!("Attempt to read match against pattern of larger {pattern_len} than requested read size {size}");
-                return Err(Error::InvalidArgs { message: format!("Attempt to read match against pattern of larger {pattern_len} than requested read size {size}") });
+                return Err(Args { message: format!("Attempt to read match against pattern of larger {pattern_len} than requested read size {size}") });
             }
         }
 
@@ -394,7 +399,7 @@ impl Bus {
     }
 
     /// Execute a bus command
-    fn execute_command(&mut self, command: BusCommand) -> Result<()> {
+    fn execute_command(&mut self, command: BusCommand) -> Result<(), Xum1541Error> {
         // Handle open/close requiring listen mode first
         if command.requires_listen_first() {
             match self.mode {
@@ -468,7 +473,7 @@ impl BusBuilder {
         self
     }
 
-    pub fn build(&mut self) -> Result<Bus> {
+    pub fn build(&mut self) -> Result<Bus, Xum1541Error> {
         // Create Device
         let xum_serial_number = self.xum_serial_number.unwrap_or(0);
         let device = if self.device.is_none() {

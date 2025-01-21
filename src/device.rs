@@ -1,14 +1,11 @@
-use crate::{Error, Result};
-use crate::{
-    BULK_IN_ENDPOINT, BULK_OUT_ENDPOINT, CAP_CBM, CAP_IEEE488, CAP_NIB, CAP_NIB_SRQ, CAP_TAP,
-    CTRL_GCCVER, CTRL_GITREV, CTRL_INIT, CTRL_LIBCVER, CTRL_RESET, CTRL_SHUTDOWN,
-    DEFAULT_CONTROL_TIMEOUT, DEFAULT_READ_TIMEOUT, DEFAULT_USB_LOOP_SLEEP, DEFAULT_USB_RESET_SLEEP,
-    DEFAULT_WRITE_TIMEOUT, IO_BUSY, IO_ERROR, IO_READY, MIN_FW_VERSION, PROTO_CBM, PROTO_MASK,
-    READ, STATUS_DOING_RESET, STATUS_IEEE488_PRESENT, STATUS_TAPE_PRESENT, WRITE, XUM1541_PID,
-    XUM1541_VID, XUM_DEVINFO_SIZE, XUM_MAX_XFER_SIZE, XUM_STATUSBUF_SIZE,
-};
 #[allow(unused_imports)]
-use log::{debug, error, info, trace, warn};
+use crate::constants::*;
+use crate::Xum1541Error::{self, *};
+use crate::DeviceAccessKind::*;
+use crate::error::InternalError;
+
+#[allow(unused_imports)]
+use log::{error, warn, info, debug, trace};
 use rusb::Device as RusbDevice;
 use rusb::DeviceHandle as RusbDeviceHandle;
 use rusb::{constants, Context, DeviceDescriptor, UsbContext};
@@ -109,7 +106,7 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(serial_num: u8) -> Result<Self> {
+    pub fn new(serial_num: u8) -> Result<Self, Xum1541Error> {
         trace!("Device::new serial_num {serial_num}");
         let mut context = Context::new()?;
         context.set_log_level(rusb::LogLevel::Debug);
@@ -127,7 +124,7 @@ impl Device {
     }
 
     /// Create new device connection with provided context
-    pub fn with_context(context: Context, serial_num: u8) -> Result<Self> {
+    pub fn with_context(context: Context, serial_num: u8) -> Result<Self, Xum1541Error> {
         trace!("Device::with_context context {context:?} serial_num {serial_num}");
         let (_device, handle) = Self::find_device(&context, serial_num)?;
 
@@ -138,7 +135,7 @@ impl Device {
         })
     }
 
-    pub fn init(&mut self) -> Result<()> {
+    pub fn init(&mut self) -> Result<(), Xum1541Error> {
         trace!("Device::init");
         self.info = Some(self.initialize_device()?);
         Ok(())
@@ -148,7 +145,7 @@ impl Device {
     fn find_device(
         context: &Context,
         serial_num: u8,
-    ) -> Result<(RusbDevice<Context>, RusbDeviceHandle<Context>)> {
+    ) -> Result<(RusbDevice<Context>, RusbDeviceHandle<Context>), Xum1541Error> {
         trace!("Device::find_device context {context:?} serial_num {serial_num}");
 
         let mut found_any_xum1541 = false;
@@ -198,19 +195,19 @@ impl Device {
         let err = match found_any_xum1541 {
             true => {
                 error!("No matching XUM1541 device found, but found non-matching serial");
-                Error::SerialMismatch {
+                DeviceAccess { kind: SerialMismatch {
                     vid: XUM1541_VID,
                     pid: XUM1541_PID,
                     actual: found_serial_nums,
                     expected: serial_num,
-                }
+                }}
             }
             false => {
                 error!("No suitable XUM1541 device found");
-                Error::DeviceNotFound {
+                DeviceAccess { kind: NotFound {
                     vid: XUM1541_VID,
                     pid: XUM1541_PID,
-                }
+                }}
             }
         };
         Err(err)
@@ -222,7 +219,7 @@ impl Device {
     /// than before.
     ///
     /// DeviceInfo may change during this process.
-    pub fn hard_reset_and_re_init(&mut self) -> Result<()> {
+    pub fn hard_reset_and_re_init(&mut self) -> Result<(), Xum1541Error> {
         trace!("Device::hard_reset_and_re_init");
         // Drop the info - this will be reinitialized shortly
         // Resetting the device doesn't require this
@@ -236,7 +233,7 @@ impl Device {
     // The device must be (re) initialized after this function.  It is
     // deliberately made a non-public function to avoid external parties
     // accidently resetting and then not re-initializing
-    fn hard_reset_pre_init(&self) -> Result<()> {
+    fn hard_reset_pre_init(&self) -> Result<(), Xum1541Error> {
         trace!("Device::hard_reset_pre_init");
         info!("Hard reset the device");
         self.handle.reset()?;
@@ -246,7 +243,7 @@ impl Device {
     }
 
     /// Initialize device and get info
-    fn initialize_device(&mut self) -> Result<DeviceInfo> {
+    fn initialize_device(&mut self) -> Result<DeviceInfo, Xum1541Error> {
         trace!("Device::initialize_device");
 
         // Hard reset the device
@@ -268,7 +265,22 @@ impl Device {
 
         // Add debug info for newer firmware versions
         if info.firmware_version >= 8 {
-            info.debug_info = Some(self.read_debug_info()?);
+            info.debug_info = match self.read_debug_info() {
+                Ok(info) => Some(info),
+                Err(e) => match e {
+                    InternalError::PublicError { error } => {
+                        // This suggests we actually hit a USB or similar error
+                        // so we treat this as failure
+                        error!("Failed to read debug info from device: {}", error);
+                        return Err(error);
+                    }
+                    e => {
+                        // Hit some sort of processing error - we'll treat this as a non-failure mode 
+                        warn!("Failed to read debug info from device: {}", e);
+                        None
+                    } 
+                }
+            };
         } else {
             debug!("Firmware earlier than 8 doesn't support extra debug info");
         }
@@ -276,7 +288,7 @@ impl Device {
         Ok(info)
     }
 
-    fn clear_halt(&self) -> Result<()> {
+    fn clear_halt(&self) -> Result<(), Xum1541Error> {
         trace!("Device::clear_halt");
 
         match self.handle.clear_halt(BULK_IN_ENDPOINT) {
@@ -308,7 +320,7 @@ impl Device {
         u16::from(buf[2]) << 8 | u16::from(buf[1])
     }
 
-    pub fn control_write(&self, request: u8, value: u16, buffer: &[u8]) -> Result<()> {
+    pub fn control_write(&self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Xum1541Error> {
         trace!(
             "Device::control_write request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
@@ -339,7 +351,7 @@ impl Device {
     }
 
     /// Implements xum1541_control_mg - reading type
-    pub fn control_read(&self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize> {
+    pub fn control_read(&self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize, Xum1541Error> {
         trace!(
             "Device::control_read request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
@@ -364,7 +376,7 @@ impl Device {
     }
 
     /// Implements IOctl()
-    pub fn command_only(&self, cmd: u8, addr: u8, secaddr: u8) -> Result<u16> {
+    pub fn command_only(&self, cmd: u8, addr: u8, secaddr: u8) -> Result<u16, Xum1541Error> {
         trace!("Device::command_only cmd 0x{cmd:02x} addr 0x{addr:02x} secaddr 0x{secaddr:02x}");
 
         // Build 4-byte command buffer
@@ -396,7 +408,7 @@ impl Device {
         self.wait_status()
     }
 
-    fn wait_status(&self) -> Result<u16> {
+    fn wait_status(&self) -> Result<u16, Xum1541Error> {
         trace!("Device::wait_status");
 
         let mut status_buf = vec![0u8; XUM_STATUSBUF_SIZE];
@@ -423,13 +435,13 @@ impl Device {
                         }
                         IO_ERROR => {
                             trace!("Device IO error");
-                            break Err(Error::CommunicationError {
+                            break Err(Communication {
                                 message: "Device returned IO error".into(),
                             });
                         }
                         num => {
                             warn!("Unexpected debug status {}", num);
-                            break Err(Error::CommunicationError {
+                        break Err(Communication {
                                 message: format!("Unexpected error from device {}", num),
                             });
                         }
@@ -441,7 +453,7 @@ impl Device {
                         len,
                         XUM_STATUSBUF_SIZE
                     );
-                    break Err(Error::CommunicationError {
+                    break Err(Communication {
                         message: format!("Device returned wrong number of status bytes {}", len),
                     });
                 }
@@ -461,14 +473,14 @@ impl Device {
     }
 
     /// Writes data to the device
-    pub fn write_data(&self, mode: u8, data: &[u8]) -> Result<usize> {
+    pub fn write_data(&self, mode: u8, data: &[u8]) -> Result<usize, Xum1541Error> {
         let size = data.len();
         trace!("Device::write_data mode b{mode:08b} data.len() {size}");
 
         // Validate inputs
         if size > XUM_MAX_XFER_SIZE {
             warn!("Attempted to write {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}");
-            return Err(Error::InvalidArgs { message: format!("Attempted to write {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}") });
+            return Err(Args { message: format!("Attempted to write {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}") });
         }
 
         // Send the write command with 4-byte command buffer
@@ -510,19 +522,19 @@ impl Device {
     }
 
     /// Reads data from the device
-    pub fn read_data(&self, mode: u8, buffer: &mut [u8]) -> Result<usize> {
+    pub fn read_data(&self, mode: u8, buffer: &mut [u8]) -> Result<usize, Xum1541Error> {
         let size = buffer.len();
         trace!("Device::read_data mode b{mode:08b} buffer.len() {size}");
 
         // Check inputs
         if size > XUM_MAX_XFER_SIZE {
             warn!("Attempted to read {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}");
-            return Err(Error::InvalidArgs { message: format!("Attempted to read {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}") });
+            return Err(Args { message: format!("Attempted to read {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}") });
         }
         let buf_len = buffer.len();
         if size > buf_len {
             warn!("Attempted to read {size} more than buffer length {buf_len}");
-            return Err(Error::InvalidArgs {
+            return Err(Args {
                 message: format!("Attempted to read {size} more than buffer length {buf_len}"),
             });
         }
@@ -556,7 +568,7 @@ impl Device {
     }
 
     /// Verify device identity and set up initial configuration
-    fn verify_and_setup_device(&mut self) -> Result<DeviceInfo> {
+    fn verify_and_setup_device(&mut self) -> Result<DeviceInfo, Xum1541Error> {
         trace!("Device::verify_and_setup_device");
         let device = self.handle.device();
         let device_desc = device.device_descriptor()?;
@@ -575,7 +587,7 @@ impl Device {
         // Verify product string
         debug!("Product string: {}", product);
         if !product.contains("xum1541") {
-            return Err(Error::InitError {
+            return Err(Init {
                 message: format!("Device product string {} didn't contain xum1541", product),
             });
         }
@@ -595,17 +607,17 @@ impl Device {
     }
 
     /// Read product string with error handling
-    fn read_product_string(&self, device_desc: &DeviceDescriptor) -> Result<String> {
+    fn read_product_string(&self, device_desc: &DeviceDescriptor) -> Result<String, Xum1541Error> {
         trace!("Device::read_product_string device_desc {device_desc:?}");
         self.handle
             .read_product_string_ascii(device_desc)
-            .map_err(|_| Error::InitError {
+            .map_err(|_| Init {
                 message: "Couldn't read device product string".into(),
             })
     }
 
     /// Set up device configuration and claim interface
-    fn setup_device_configuration(&mut self) -> Result<()> {
+    fn setup_device_configuration(&mut self) -> Result<(), Xum1541Error> {
         trace!("Device::setup_device_configuration");
         let config = self.handle.active_configuration()?;
         debug!("Current configuration is {}", config);
@@ -620,7 +632,7 @@ impl Device {
     }
 
     /// Read basic device information
-    fn read_basic_info(&mut self, initial_info: &DeviceInfo) -> Result<DeviceInfo> {
+    fn read_basic_info(&mut self, initial_info: &DeviceInfo) -> Result<DeviceInfo, Xum1541Error> {
         trace!("Device::read_basic_info initial_info {initial_info:?}");
         let mut info_buf = [0u8; XUM_DEVINFO_SIZE];
         let len = self.control_read(CTRL_INIT as u8, 0, &mut info_buf)?;
@@ -648,17 +660,19 @@ impl Device {
 
         // Verify firmware version
         if info.firmware_version < MIN_FW_VERSION {
-            return Err(Error::FirmwareVersion {
+            return Err(DeviceAccess { kind: FirmwareVersion {
                 actual: info.firmware_version,
                 expected: MIN_FW_VERSION,
-            });
+            }});
+        } else if info.firmware_version > CUR_FW_VERSION {
+            warn!("XUM1541 device has later firmware {} than expected {CUR_FW_VERSION}", info.firmware_version);
         }
 
         Ok(info)
     }
 
     /// Read debug information from device
-    fn read_debug_info(&mut self) -> Result<DeviceDebugInfo> {
+    fn read_debug_info(&mut self) -> Result<DeviceDebugInfo, InternalError> {
         trace!("Device::read_debug_info");
         let ver_cmds = [CTRL_GITREV, CTRL_GCCVER, CTRL_LIBCVER];
         let mut debug_info = DeviceDebugInfo::default();
@@ -671,7 +685,7 @@ impl Device {
                     self.update_debug_info(&mut debug_info, cmd, debug_str);
                 }
                 Err(e) => match e {
-                    Error::DeviceInfoError { message } => {
+                    InternalError::DeviceInfo { message } => {
                         debug!("No debug data for command {}: {} - ignoring", cmd, message);
                     }
                     e => {
@@ -685,7 +699,7 @@ impl Device {
     }
 
     /// Read a single debug command
-    fn read_debug_command(&mut self, cmd: u8, info_buf: &mut [u8]) -> Result<String> {
+    fn read_debug_command(&mut self, cmd: u8, info_buf: &mut [u8]) -> Result<String, InternalError> {
         trace!(
             "Device::read_debug_command cmd {cmd} info_buf.len() {}",
             info_buf.len()
@@ -693,19 +707,19 @@ impl Device {
         match self.control_read(cmd, 0, info_buf) {
             Ok(len) if len > 0 => from_utf8(info_buf)
                 .map(|s| s.trim_matches(char::from(0)).to_string())
-                .map_err(|_| Error::DeviceInfoError {
+                .map_err(|_| InternalError::DeviceInfo {
                     message: "Invalid UTF-8 in debug info".into(),
                 }),
             Ok(_) => {
                 debug!("No debug data for command {:?}", cmd);
-                Err(Error::DeviceInfoError {
+                Err(InternalError::DeviceInfo {
                     message: "No debug data available".into(),
                 })
             }
             Err(e) => {
                 // Propagate the error
                 debug!("Failed to read debug info for command {:?}: {:?}", cmd, e);
-                Err(e)
+                Err(e.into())
             }
         }
     }
@@ -755,10 +769,10 @@ mod tests {
         let result = Device::new(99);
         assert!(matches!(
             result,
-            Err(Error::DeviceNotFound {
+            Err(DeviceAccess { kind: NotFound {
                 vid: XUM1541_VID,
                 pid: XUM1541_PID
-            })
+            }})
         ));
     }
 }

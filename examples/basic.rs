@@ -1,9 +1,11 @@
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
 use rusb::UsbContext;
-use xum1541::{BusBuilder, Error, Result};
+use xum1541::BusBuilder;
+mod common;
+use common::AppError;
 
-fn code() -> Result<()> {
+fn code() -> Result<(), AppError> {
     info!("Create rusb context and logging");
     let mut context = rusb::Context::new().unwrap();
     context.set_log_level(rusb::LogLevel::Info);
@@ -52,7 +54,7 @@ fn code() -> Result<()> {
     bus.read(&mut data)?;
     let data_str = std::str::from_utf8(&data)
         .inspect_err(|e| warn!("Failed to convert data into string {}", e))
-        .map_err(|e| Error::InternalError {
+        .map_err(|e| AppError::App {
             message: format!("Failed to convert data into string {}", e),
         })?;
     println!("Retrieved data from drive: {}", data_str);
@@ -64,7 +66,7 @@ fn code() -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), AppError> {
     env_logger::init();
 
     // Use our own eprintln to print errors so our Error display is used instead
