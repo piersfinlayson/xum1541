@@ -1,8 +1,6 @@
-use rusb::UsbContext;
 #[allow(unused_imports)]
-use tracing::{debug, error, info, trace, warn};
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::{fmt, registry, EnvFilter};
+use log::{debug, error, info, trace, warn};
+use rusb::UsbContext;
 use xum1541::{BusBuilder, Error, Result};
 
 fn code() -> Result<()> {
@@ -51,7 +49,7 @@ fn code() -> Result<()> {
 
     // Read up to 256 bytes of data (this will read drive status)
     let mut data = vec![0u8; 256];
-    bus.read(&mut data, 256)?;
+    bus.read(&mut data)?;
     let data_str = std::str::from_utf8(&data)
         .inspect_err(|e| warn!("Failed to convert data into string {}", e))
         .map_err(|e| Error::InternalError {
@@ -67,9 +65,7 @@ fn code() -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let format = fmt::layer().with_level(true);
-    let filter = EnvFilter::from_default_env();
-    registry().with(filter).with(format).init();
+    env_logger::init();
 
     // Use our own eprintln to print errors so our Error display is used instead
     // of Rust's default one

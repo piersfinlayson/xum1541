@@ -12,10 +12,10 @@ path = "src/lib.rs"
 [dependencies]
 rusb = "0.9"
 thiserror = "2.0"
-tracing = "0.1"
+log = "0.4"
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 
 [dev-dependencies]
 tokio-test = "0.4"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+env_logger = "0.11"  # Required by examples

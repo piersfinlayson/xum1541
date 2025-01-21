@@ -2,10 +2,10 @@ use crate::device::{Device, DeviceInfo};
 #[allow(unused_imports)]
 use crate::{Error, Result};
 use crate::{CTRL_RESET, PROTO_CBM, PROTO_WRITE_ATN, PROTO_WRITE_TALK};
-use rusb::Context;
-use std::time::Duration;
 #[allow(unused_imports)]
-use tracing::{debug, error, info, trace, warn};
+use log::{debug, error, info, trace, warn};
+use rusb::{Context, UsbContext};
+use std::time::Duration;
 
 const DEFAULT_BUS_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -145,13 +145,6 @@ impl BusCommand {
     }
 }
 
-#[derive(Debug)]
-pub struct Bus {
-    device: Device,
-    _timeout: Duration,
-    mode: BusMode,
-}
-
 /// The Bus struct is the main interface for accessing Commodore disk drives.
 /// It provides key bus-level primitives, such as
 /// * reset (this bus)
@@ -163,11 +156,19 @@ pub struct Bus {
 /// * close (close a file on a drive)
 /// * untalk
 /// * unlisten
+#[derive(Debug)]
+pub struct Bus {
+    device: Device,
+    _timeout: Duration,
+    mode: BusMode,
+}
+
 impl Bus {
     /// Create a new Bus instance
     /// Consider using BusBuilder to create a Bus instance as this will also
     /// create the required Device instance
     pub fn new(device: Device, timeout: Duration) -> Self {
+        trace!("Bus::new");
         Bus {
             device,
             _timeout: timeout,
@@ -176,6 +177,7 @@ impl Bus {
     }
 
     pub fn initialize(&mut self) -> Result<()> {
+        trace!("Bus::initialize");
         self.device.init()
     }
 
@@ -229,10 +231,12 @@ impl Bus {
     }
 
     /// Read data from the bus (from a drive that is in talk mode)
-    pub fn read(&self, buf: &mut [u8], size: usize) -> Result<usize> {
-        trace!("Entered Bus::read");
-        Self::validate_read_params(size, None, false)?;
-        self.device.read_data(PROTO_CBM, buf, size)
+    pub fn read(&self, buf: &mut [u8]) -> Result<usize> {
+        trace!("Entered Bus::read buf.len(): {}", buf.len());
+
+        Self::validate_read_params(buf, None, false)?;
+
+        self.device.read_data(PROTO_CBM, buf)
     }
 
     /// Write data to the bus (to a drive that is in listen mode)
@@ -241,9 +245,8 @@ impl Bus {
         let size = buf.len();
         if size == 0 {
             warn!("Attempt to write 0 bytes");
-            return Err(Error::SizeTooSmall {
-                attempt: size,
-                min: 1,
+            return Err(Error::InvalidArgs {
+                message: format!("Attempt to write 0 bytes"),
             });
         }
         self.device.write_data(PROTO_CBM, buf)
@@ -263,11 +266,16 @@ impl Bus {
         }
     }
 
-    /// Read data from the bus until either size bytes are read or pattern is matched
+    /// Read data from the bus until either buf.len() bytes are read or pattern is matched
     /// Returns the number of bytes read (including the pattern if found)
-    pub fn read_until(&self, buf: &mut Vec<u8>, size: usize, pattern: &[u8]) -> Result<usize> {
-        trace!("Entered Bus::read_until");
-        Self::validate_read_params(size, Some(pattern.len()), true)?;
+    pub fn read_until(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize> {
+        let size = buf.len();
+        trace!(
+            "Bus::read_until buf.len() {size} pattern.len() {}",
+            pattern.len()
+        );
+
+        Self::validate_read_params(buf, Some(pattern.len()), true)?;
 
         let mut total_read = 0;
         let pattern_len = pattern.len();
@@ -276,13 +284,14 @@ impl Bus {
             match self.read_one_byte()? {
                 None => break, // EOF
                 Some(byte) => {
-                    buf.push(byte);
+                    buf[total_read] = byte;
                     total_read += 1;
 
                     // Check if we have enough bytes to match the pattern
                     if total_read >= pattern_len {
                         // Compare the last pattern_len bytes with our pattern
                         if buf[total_read - pattern_len..total_read] == pattern[..] {
+                            trace!("Found pattern in read data");
                             break;
                         }
                     }
@@ -295,16 +304,30 @@ impl Bus {
 
     /// Read data from the bus until either size bytes are read or any byte from pattern is matched
     /// Returns the number of bytes read (including the matching byte if found)
-    pub fn read_until_any(&self, buf: &mut Vec<u8>, size: usize, pattern: &[u8]) -> Result<usize> {
-        trace!("Entered Bus::read_until_any");
-        Self::validate_read_params(size, Some(pattern.len()), false)?;
+    pub fn read_until_any(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize> {
+        let size = buf.len();
+        trace!(
+            "Bus::read_until_any buf.len() {size} pattern.len() {}",
+            pattern.len()
+        );
+        if buf.len() < size {
+            return Err(Error::InvalidArgs {
+                message: format!(
+                    "Buffer length {} shorter than requested read size{}",
+                    buf.len(),
+                    size
+                ),
+            });
+        }
+
+        Self::validate_read_params(buf, Some(pattern.len()), false)?;
 
         let mut total_read = 0;
         while total_read < size {
             match self.read_one_byte()? {
                 None => break, // EOF
                 Some(byte) => {
-                    buf.push(byte);
+                    buf[total_read] = byte;
                     total_read += 1;
 
                     if pattern.contains(&byte) {
@@ -322,10 +345,14 @@ impl Bus {
 impl Bus {
     /// Common helper function for reading a single byte
     fn read_one_byte(&self) -> Result<Option<u8>> {
-        let mut temp = Vec::with_capacity(1);
-        match self.device.read_data(PROTO_CBM, &mut temp, 1) {
+        trace!("Bus::read_one_byte");
+        let mut temp = vec![0u8; 1];
+        match self.device.read_data(PROTO_CBM, &mut temp) {
             Ok(0) => Ok(None), // EOF
-            Ok(1) => Ok(Some(temp[0])),
+            Ok(1) => {
+                trace!("Got a byte 0x{:02x}", temp[0]);
+                Ok(Some(temp[0]))
+            }
             Ok(_) => unreachable!(), // We only requested 1 byte
             Err(e) => Err(e),
         }
@@ -335,33 +362,31 @@ impl Bus {
     /// pattern_len: Option<usize> - if provided, validates pattern length requirements
     /// check_pattern_size: bool - if true and pattern_len provided, checks pattern isn't larger than size
     fn validate_read_params(
-        size: usize,
+        buf: &[u8],
         pattern_len: Option<usize>,
         check_pattern_size: bool,
     ) -> Result<()> {
+        let size = buf.len();
+        trace!("Bus::validate_read_params buf.len(): {size} pattern_len: {pattern_len:?} check_pattern_size: {check_pattern_size}");
+
         if size == 0 {
             warn!("Attempt to read 0 bytes");
-            return Err(Error::SizeTooSmall {
-                attempt: size,
-                min: 1,
+            return Err(Error::InvalidArgs {
+                message: format!("Attempted to read 0 bytes"),
             });
         }
 
         if let Some(pattern_len) = pattern_len {
             if pattern_len == 0 {
-                warn!("Attempt to read until empty pattern");
-                return Err(Error::SizeTooSmall {
-                    attempt: pattern_len,
-                    min: 1,
+                warn!("Attempt to read match against empty pattern");
+                return Err(Error::InvalidArgs {
+                    message: format!("Attempt to read match against empty pattern"),
                 });
             }
 
             if check_pattern_size && pattern_len > size {
-                warn!("Attempt to read until pattern larger than requested size");
-                return Err(Error::SizeTooLarge {
-                    attempt: pattern_len,
-                    max: size,
-                });
+                warn!("Attempt to read match against pattern of larger {pattern_len} than requested read size {size}");
+                return Err(Error::InvalidArgs { message: format!("Attempt to read match against pattern of larger {pattern_len} than requested read size {size}") });
             }
         }
 
@@ -451,7 +476,9 @@ impl BusBuilder {
                 let context = self.context.take().unwrap();
                 Device::with_context(context, xum_serial_number)?
             } else {
-                Device::new(xum_serial_number)?
+                let mut context = rusb::Context::new()?;
+                context.set_log_level(rusb::LogLevel::Info);
+                Device::with_context(context, xum_serial_number)?
             }
         } else {
             self.device.take().unwrap()

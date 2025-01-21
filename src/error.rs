@@ -14,6 +14,9 @@ pub enum Error {
     #[error("Invalid XUM1541 firmware version {actual}, expected minimum {expected}")]
     FirmwareVersion { actual: u8, expected: u8 },
 
+    #[error("Invalid device information: {message}")]
+    DeviceInfoError { message: String },
+
     #[error("XUM1541 device communication error: {message}")]
     CommunicationError { message: String },
 
@@ -34,11 +37,8 @@ pub enum Error {
         expected: u8,
     },
 
-    #[error("Calling code attempted to read or write too many bytes {attempt} vs max {max}")]
-    SizeTooLarge { attempt: usize, max: usize },
-
-    #[error("Calling code attempted to read or write too few bytes {attempt} vs min {min}")]
-    SizeTooSmall { attempt: usize, min: usize },
+    #[error("xum1541 library called with invalid arguments: {message}")]
+    InvalidArgs { message: String },
 
     #[error("XUM1541 internal error {message}")]
     InternalError { message: String },

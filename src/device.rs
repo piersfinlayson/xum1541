@@ -7,14 +7,14 @@ use crate::{
     READ, STATUS_DOING_RESET, STATUS_IEEE488_PRESENT, STATUS_TAPE_PRESENT, WRITE, XUM1541_PID,
     XUM1541_VID, XUM_DEVINFO_SIZE, XUM_MAX_XFER_SIZE, XUM_STATUSBUF_SIZE,
 };
+#[allow(unused_imports)]
+use log::{debug, error, info, trace, warn};
 use rusb::Device as RusbDevice;
 use rusb::DeviceHandle as RusbDeviceHandle;
 use rusb::{constants, Context, DeviceDescriptor, UsbContext};
 use std::cmp::min;
 use std::str::from_utf8;
 use std::thread::sleep;
-#[allow(unused_imports)]
-use tracing::{debug, error, info, trace, warn};
 
 #[derive(Debug)]
 pub struct DeviceDebugInfo {
@@ -110,21 +110,25 @@ pub struct Device {
 
 impl Device {
     pub fn new(serial_num: u8) -> Result<Self> {
+        trace!("Device::new serial_num {serial_num}");
         let mut context = Context::new()?;
         context.set_log_level(rusb::LogLevel::Debug);
         Self::with_context(context, serial_num)
     }
 
     pub fn context(&self) -> &Context {
+        trace!("Device::context");
         &self.context
     }
 
     pub fn info(&self) -> Option<&DeviceInfo> {
+        trace!("Device::info");
         self.info.as_ref()
     }
 
     /// Create new device connection with provided context
     pub fn with_context(context: Context, serial_num: u8) -> Result<Self> {
+        trace!("Device::with_context context {context:?} serial_num {serial_num}");
         let (_device, handle) = Self::find_device(&context, serial_num)?;
 
         Ok(Self {
@@ -135,19 +139,17 @@ impl Device {
     }
 
     pub fn init(&mut self) -> Result<()> {
+        trace!("Device::init");
         self.info = Some(self.initialize_device()?);
         Ok(())
     }
 
-    /// Find XUM1541 device and get handle
+    /// Enumerate the bus, find the appropriate device and open it
     fn find_device(
         context: &Context,
         serial_num: u8,
     ) -> Result<(RusbDevice<Context>, RusbDeviceHandle<Context>)> {
-        debug!(
-            "Searching for XUM1541 device with serial_num: {}",
-            serial_num
-        );
+        trace!("Device::find_device context {context:?} serial_num {serial_num}");
 
         let mut found_any_xum1541 = false;
         let mut found_serial_nums = vec![];
@@ -221,6 +223,7 @@ impl Device {
     ///
     /// DeviceInfo may change during this process.
     pub fn hard_reset_and_re_init(&mut self) -> Result<()> {
+        trace!("Device::hard_reset_and_re_init");
         // Drop the info - this will be reinitialized shortly
         // Resetting the device doesn't require this
         self.info = None;
@@ -234,6 +237,7 @@ impl Device {
     // deliberately made a non-public function to avoid external parties
     // accidently resetting and then not re-initializing
     fn hard_reset_pre_init(&self) -> Result<()> {
+        trace!("Device::hard_reset_pre_init");
         info!("Hard reset the device");
         self.handle.reset()?;
         sleep(DEFAULT_USB_RESET_SLEEP);
@@ -243,7 +247,7 @@ impl Device {
 
     /// Initialize device and get info
     fn initialize_device(&mut self) -> Result<DeviceInfo> {
-        debug!("Starting device initialization");
+        trace!("Device::initialize_device");
 
         // Hard reset the device
         // This fixes a multitude of problems - including
@@ -273,7 +277,7 @@ impl Device {
     }
 
     fn clear_halt(&self) -> Result<()> {
-        // Clear halt on both endpoints
+        trace!("Device::clear_halt");
 
         match self.handle.clear_halt(BULK_IN_ENDPOINT) {
             Ok(_) => (),
@@ -293,15 +297,22 @@ impl Device {
     }
 
     fn get_status(buf: &[u8]) -> u8 {
+        trace!("Device::get_status buf.len() {}", buf.len());
+        assert!(buf.len() >= 1);
         buf[0]
     }
 
     fn get_status_val(buf: &[u8]) -> u16 {
+        trace!("Device::get_status_val buf.len() {}", buf.len());
+        assert!(buf.len() >= 3);
         u16::from(buf[2]) << 8 | u16::from(buf[1])
     }
 
     pub fn control_write(&self, request: u8, value: u16, buffer: &[u8]) -> Result<()> {
-        trace!("Entered control_write");
+        trace!(
+            "Device::control_write request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
+            buffer.len()
+        );
         const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
             | constants::LIBUSB_RECIPIENT_ENDPOINT
             | constants::LIBUSB_ENDPOINT_OUT;
@@ -329,6 +340,11 @@ impl Device {
 
     /// Implements xum1541_control_mg - reading type
     pub fn control_read(&self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize> {
+        trace!(
+            "Device::control_read request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
+            buffer.len()
+        );
+
         // Class-specific request, device as recipient, with IN direction
         const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
             | constants::LIBUSB_RECIPIENT_ENDPOINT
@@ -349,6 +365,8 @@ impl Device {
 
     /// Implements IOctl()
     pub fn command_only(&self, cmd: u8, addr: u8, secaddr: u8) -> Result<u16> {
+        trace!("Device::command_only cmd 0x{cmd:02x} addr 0x{addr:02x} secaddr 0x{secaddr:02x}");
+
         // Build 4-byte command buffer
         let cmd_buf = [cmd, addr, secaddr, 0u8];
 
@@ -379,7 +397,8 @@ impl Device {
     }
 
     fn wait_status(&self) -> Result<u16> {
-        debug!("Wait status");
+        trace!("Device::wait_status");
+
         let mut status_buf = vec![0u8; XUM_STATUSBUF_SIZE];
         loop {
             trace!("Read bulk endpoint 0x{:02x}", BULK_IN_ENDPOINT);
@@ -441,14 +460,15 @@ impl Device {
         }
     }
 
-    /// Implements WRITE()
+    /// Writes data to the device
     pub fn write_data(&self, mode: u8, data: &[u8]) -> Result<usize> {
         let size = data.len();
+        trace!("Device::write_data mode b{mode:08b} data.len() {size}");
+
+        // Validate inputs
         if size > XUM_MAX_XFER_SIZE {
-            return Err(Error::SizeTooLarge {
-                attempt: size,
-                max: XUM_MAX_XFER_SIZE,
-            });
+            warn!("Attempted to write {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}");
+            return Err(Error::InvalidArgs { message: format!("Attempted to write {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}") });
         }
 
         // Send the write command with 4-byte command buffer
@@ -489,20 +509,24 @@ impl Device {
         }
     }
 
-    /// Implements xum1541_read()
-    pub fn read_data(&self, mode: u8, buffer: &mut [u8], size: usize) -> Result<usize> {
+    /// Reads data from the device
+    pub fn read_data(&self, mode: u8, buffer: &mut [u8]) -> Result<usize> {
+        let size = buffer.len();
+        trace!("Device::read_data mode b{mode:08b} buffer.len() {size}");
+
+        // Check inputs
         if size > XUM_MAX_XFER_SIZE {
-            return Err(Error::SizeTooLarge {
-                attempt: size,
-                max: XUM_MAX_XFER_SIZE,
+            warn!("Attempted to read {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}");
+            return Err(Error::InvalidArgs { message: format!("Attempted to read {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}") });
+        }
+        let buf_len = buffer.len();
+        if size > buf_len {
+            warn!("Attempted to read {size} more than buffer length {buf_len}");
+            return Err(Error::InvalidArgs {
+                message: format!("Attempted to read {size} more than buffer length {buf_len}"),
             });
         }
-        if size > buffer.len() {
-            return Err(Error::SizeTooLarge {
-                attempt: size,
-                max: buffer.len(),
-            });
-        }
+
         // Send read command with 4-byte command buffer
         let cmd_buf = [READ, mode, (size & 0xff) as u8, ((size >> 8) & 0xff) as u8];
 
@@ -533,6 +557,7 @@ impl Device {
 
     /// Verify device identity and set up initial configuration
     fn verify_and_setup_device(&mut self) -> Result<DeviceInfo> {
+        trace!("Device::verify_and_setup_device");
         let device = self.handle.device();
         let device_desc = device.device_descriptor()?;
 
@@ -571,6 +596,7 @@ impl Device {
 
     /// Read product string with error handling
     fn read_product_string(&self, device_desc: &DeviceDescriptor) -> Result<String> {
+        trace!("Device::read_product_string device_desc {device_desc:?}");
         self.handle
             .read_product_string_ascii(device_desc)
             .map_err(|_| Error::InitError {
@@ -580,6 +606,7 @@ impl Device {
 
     /// Set up device configuration and claim interface
     fn setup_device_configuration(&mut self) -> Result<()> {
+        trace!("Device::setup_device_configuration");
         let config = self.handle.active_configuration()?;
         debug!("Current configuration is {}", config);
         if config != 1 {
@@ -594,6 +621,7 @@ impl Device {
 
     /// Read basic device information
     fn read_basic_info(&mut self, initial_info: &DeviceInfo) -> Result<DeviceInfo> {
+        trace!("Device::read_basic_info initial_info {initial_info:?}");
         let mut info_buf = [0u8; XUM_DEVINFO_SIZE];
         let len = self.control_read(CTRL_INIT as u8, 0, &mut info_buf)?;
 
@@ -631,45 +659,62 @@ impl Device {
 
     /// Read debug information from device
     fn read_debug_info(&mut self) -> Result<DeviceDebugInfo> {
+        trace!("Device::read_debug_info");
         let ver_cmds = [CTRL_GITREV, CTRL_GCCVER, CTRL_LIBCVER];
         let mut debug_info = DeviceDebugInfo::default();
         let mut info_buf = [0u8; XUM_DEVINFO_SIZE];
 
         // Process each command independently, ignoring failures
         for cmd in ver_cmds {
-            if let Ok(debug_str) = self.read_debug_command(cmd, &mut info_buf) {
-                self.update_debug_info(&mut debug_info, cmd, debug_str);
+            match self.read_debug_command(cmd, &mut info_buf) {
+                Ok(debug_str) => {
+                    self.update_debug_info(&mut debug_info, cmd, debug_str);
+                }
+                Err(e) => match e {
+                    Error::DeviceInfoError { message } => {
+                        debug!("No debug data for command {}: {} - ignoring", cmd, message);
+                    }
+                    e => {
+                        warn!("Failed to read debug info for command {}: {}", cmd, e);
+                        return Err(e);
+                    }
+                },
             }
         }
-
         Ok(debug_info)
     }
 
     /// Read a single debug command
     fn read_debug_command(&mut self, cmd: u8, info_buf: &mut [u8]) -> Result<String> {
+        trace!(
+            "Device::read_debug_command cmd {cmd} info_buf.len() {}",
+            info_buf.len()
+        );
         match self.control_read(cmd, 0, info_buf) {
             Ok(len) if len > 0 => from_utf8(info_buf)
                 .map(|s| s.trim_matches(char::from(0)).to_string())
-                .map_err(|_| Error::InitError {
+                .map_err(|_| Error::DeviceInfoError {
                     message: "Invalid UTF-8 in debug info".into(),
                 }),
             Ok(_) => {
                 debug!("No debug data for command {:?}", cmd);
-                Err(Error::InitError {
+                Err(Error::DeviceInfoError {
                     message: "No debug data available".into(),
                 })
             }
             Err(e) => {
+                // Propagate the error
                 debug!("Failed to read debug info for command {:?}: {:?}", cmd, e);
-                Err(Error::InitError {
-                    message: format!("Failed to read debug info: {}", e),
-                })
+                Err(e)
             }
         }
     }
 
     /// Update debug info structure with command results
     fn update_debug_info(&self, debug_info: &mut DeviceDebugInfo, cmd: u8, debug_str: String) {
+        trace!(
+            "Device::update_debug_info debug_info {debug_info:?} cmd {cmd} debug_str {debug_str}"
+        );
         let description = match cmd {
             CTRL_GITREV => {
                 debug_info.git_rev = Some(debug_str.clone());
@@ -691,7 +736,7 @@ impl Device {
 
 impl Drop for Device {
     fn drop(&mut self) {
-        trace!("Entered drop");
+        trace!("Device::drop");
         // Send shutdown command - ignoring errors since we're in drop
         let _ = self.control_write(CTRL_SHUTDOWN, 0, &[]);
 
