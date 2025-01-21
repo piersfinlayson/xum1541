@@ -1,14 +1,17 @@
-use crate::constants::{MAX_CHANNEL_NUM, MIN_CHANNEL_NUM, MAX_DEVICE_NUM, MIN_DEVICE_NUM, PROTO_CBM, PROTO_WRITE_ATN, PROTO_WRITE_TALK};
+use crate::constants::{
+    MAX_CHANNEL_NUM, MAX_DEVICE_NUM, MIN_CHANNEL_NUM, MIN_DEVICE_NUM, PROTO_CBM, PROTO_WRITE_ATN,
+    PROTO_WRITE_TALK,
+};
 
+use crate::Xum1541Error;
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
-use crate::Xum1541Error;
 use std::fmt;
 
 /// Struct holding Device and Channel numbers
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DeviceChannel {
-    device: u8,  // Now private
+    device: u8, // Now private
     channel: u8,
 }
 
@@ -22,12 +25,16 @@ impl DeviceChannel {
     }
 
     // Getters since fields are now private
-    pub const fn device(&self) -> u8 { self.device }
-    pub const fn channel(&self) -> u8 { self.channel }
+    pub const fn device(&self) -> u8 {
+        self.device
+    }
+    pub const fn channel(&self) -> u8 {
+        self.channel
+    }
 
     pub fn validate(device: u8, channel: u8) -> Result<(), Xum1541Error> {
         trace!("DeviceChannel::validate: device {device} and channel {channel}");
-        
+
         if device < MIN_DEVICE_NUM {
             trace!("Device {device} below minimum {MIN_DEVICE_NUM}");
             Err(Xum1541Error::Args {
@@ -46,7 +53,9 @@ impl DeviceChannel {
         } else if channel > MAX_CHANNEL_NUM {
             trace!("Channel {channel} above maximum {MAX_CHANNEL_NUM}");
             Err(Xum1541Error::Args {
-                message: format!("Channel number {channel} is greater than maximum {MAX_CHANNEL_NUM}"),
+                message: format!(
+                    "Channel number {channel} is greater than maximum {MAX_CHANNEL_NUM}"
+                ),
             })
         } else {
             trace!("Validation successful for device {device} channel {channel}");
@@ -216,8 +225,10 @@ impl BusCommand {
 
     pub fn device_channel(&self) -> Option<DeviceChannel> {
         match self {
-            BusCommand::Talk(dc) | BusCommand::Listen(dc) 
-            | BusCommand::Open(dc) | BusCommand::Close(dc) => Some(dc.clone()),
+            BusCommand::Talk(dc)
+            | BusCommand::Listen(dc)
+            | BusCommand::Open(dc)
+            | BusCommand::Close(dc) => Some(dc.clone()),
             _ => None,
         }
     }

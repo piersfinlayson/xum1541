@@ -1,9 +1,9 @@
+use crate::buscmd::{BusCommand, BusMode, DeviceChannel};
 #[allow(unused_imports)]
 use crate::constants::*;
 #[allow(unused_imports)]
 use crate::Xum1541Error::{self, *};
 use crate::{Device, DeviceInfo};
-use crate::buscmd::{BusMode, BusCommand, DeviceChannel};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
