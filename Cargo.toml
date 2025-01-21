@@ -2,8 +2,19 @@
 name = "xum1541"
 version = "0.1.0"
 edition = "2021"
+authors = ["Piers Finlayson <piers@piers.rocks>"]
 description = "Rust driver for XUM1541 USB device"
+repository  = "https://github.com/piersfinlayson/xum1541"
 license = "GPL-3.0"
+documentation = "https://docs.rs/rxum1541"
+keywords = ["commodore", "disk", "1541", "opencbm", "retro"]
+categories = [
+    "hardware-support",
+    "asynchronous",
+    "emulators",
+    "development-tools",
+    "filesystem"
+]
 
 [lib]
 name = "xum1541"
