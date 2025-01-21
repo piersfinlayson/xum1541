@@ -86,7 +86,13 @@ impl fmt::Display for DeviceChannel {
     }
 }
 
-#[derive(Debug)]
+/// We support three modes on the bus:
+/// * Talking - Drive with DeviceChannel has been told to talk
+/// * Listening - Drive with DeviceChannel has been told to listen, or Open
+///               has been sent to the drive
+/// * Idle - Talking/Listening has been cancelled.  Note Bus is also in Idle
+///          after a complete Open sequence (which is Open, Write, Unlisten)
+#[derive(Debug, PartialEq)]
 pub enum BusMode {
     Talking(DeviceChannel),
     Listening(DeviceChannel),
@@ -109,6 +115,25 @@ impl fmt::Display for BusMode {
     }
 }
 
+/// Supported sequences of commands:
+///
+/// Open file:
+/// - Open (execute command, on DeviceChannel)
+/// - Write filename
+/// - Unlisten
+///
+/// Close file:
+/// - Close (execute command, on DeviceChannel)
+///
+/// Reading data from drive:
+/// - Talk (DeviceChannel)
+/// - Read data
+/// - Untalk
+///
+/// Sending data to drive:
+/// - Listen (DeviceChannel)
+/// - Write data
+/// - Unlisten
 #[derive(Debug)]
 pub enum BusCommand {
     Talk(DeviceChannel),
@@ -133,22 +158,6 @@ impl fmt::Display for BusCommand {
 }
 
 impl BusCommand {
-    pub fn new_talk(device: u8, channel: u8) -> Result<Self, Xum1541Error> {
-        Ok(Self::Talk(DeviceChannel::new(device, channel)?))
-    }
-
-    pub fn new_listen(device: u8, channel: u8) -> Result<Self, Xum1541Error> {
-        Ok(Self::Listen(DeviceChannel::new(device, channel)?))
-    }
-
-    pub fn new_open(device: u8, channel: u8) -> Result<Self, Xum1541Error> {
-        Ok(Self::Open(DeviceChannel::new(device, channel)?))
-    }
-
-    pub fn new_close(device: u8, channel: u8) -> Result<Self, Xum1541Error> {
-        Ok(Self::Close(DeviceChannel::new(device, channel)?))
-    }
-
     pub fn protocol(&self) -> u8 {
         match self {
             BusCommand::Talk(_) => PROTO_CBM | PROTO_WRITE_ATN | PROTO_WRITE_TALK,
@@ -175,61 +184,6 @@ impl BusCommand {
             BusCommand::Unlisten => "Entered Bus::unlisten",
             BusCommand::Open(_) => "Entered Bus::open",
             BusCommand::Close(_) => "Entered Bus::close",
-        }
-    }
-
-    pub fn conflicts_with(&self, current_mode: &BusMode) -> Option<&'static str> {
-        match (self, current_mode) {
-            (BusCommand::Talk(_), BusMode::Talking(_)) => {
-                Some("Setting new talker while device is still talking")
-            }
-            (BusCommand::Talk(_), BusMode::Listening(_)) => {
-                Some("Setting talker while device is listening")
-            }
-            (BusCommand::Listen(_), BusMode::Talking(_)) => {
-                Some("Setting listener while device is talking")
-            }
-            (BusCommand::Listen(_), BusMode::Listening(_)) => {
-                Some("Setting new listener while device is still listening")
-            }
-            (BusCommand::Untalk, BusMode::Listening(_)) => {
-                Some("Clearing talker while device is listening")
-            }
-            (BusCommand::Untalk, BusMode::Idle) => Some("Clearing talker when bus is idle"),
-            (BusCommand::Unlisten, BusMode::Talking(_)) => {
-                Some("Clearing listener while device is talking")
-            }
-            (BusCommand::Unlisten, BusMode::Idle) => Some("Clearing listener when bus is idle"),
-            (BusCommand::Open(_) | BusCommand::Close(_), BusMode::Talking(_)) => {
-                Some("Cannot open/close while device is talking")
-            }
-            (BusCommand::Open(_) | BusCommand::Close(_), BusMode::Idle) => {
-                Some("Cannot open/close when no device is listening")
-            }
-            _ => None,
-        }
-    }
-
-    pub fn requires_listen_first(&self) -> bool {
-        matches!(self, BusCommand::Open(_) | BusCommand::Close(_))
-    }
-
-    pub fn next_mode(&self) -> BusMode {
-        match self {
-            BusCommand::Talk(dc) => BusMode::Talking(dc.clone()),
-            BusCommand::Listen(dc) => BusMode::Listening(dc.clone()),
-            BusCommand::Untalk | BusCommand::Unlisten => BusMode::Idle,
-            BusCommand::Open(dc) | BusCommand::Close(dc) => BusMode::Listening(dc.clone()),
-        }
-    }
-
-    pub fn device_channel(&self) -> Option<DeviceChannel> {
-        match self {
-            BusCommand::Talk(dc)
-            | BusCommand::Listen(dc)
-            | BusCommand::Open(dc)
-            | BusCommand::Close(dc) => Some(dc.clone()),
-            _ => None,
         }
     }
 }

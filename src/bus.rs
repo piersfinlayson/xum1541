@@ -103,6 +103,10 @@ impl Bus {
 
         Self::validate_read_params(buf, None, false)?;
 
+        if let BusMode::Listening(_) = self.mode {
+            warn!("Instructed to write data when Bus in mode {}", self.mode);
+        }
+
         self.device.read_data(PROTO_CBM, buf)
     }
 
@@ -115,6 +119,9 @@ impl Bus {
             return Err(Args {
                 message: format!("Attempt to write 0 bytes"),
             });
+        }
+        if let BusMode::Talking(_) = self.mode {
+            warn!("Instructed to write data when Bus in mode {}", self.mode);
         }
         self.device.write_data(PROTO_CBM, buf)
     }
@@ -262,35 +269,68 @@ impl Bus {
 
     /// Execute a bus command
     fn execute_command(&mut self, command: BusCommand) -> Result<(), Xum1541Error> {
-        trace!("Entered Bus::execute_command command {command}");
-        // Handle open/close requiring listen mode first
-        if command.requires_listen_first() {
-            match &self.mode {
-                BusMode::Listening(dc) => {
-                    if let Some(cmd_dc) = command.device_channel() {
-                        if *dc != cmd_dc {
-                            warn!("Opening/closing channel on different device than currently listening");
-                        }
-                    }
+        trace!(
+            "Entered Bus::execute_command command {command} bus in mode {}",
+            self.mode
+        );
+
+        // Check the the command is valid for the current mode, and set the
+        // bus to the new state
+        match command {
+            BusCommand::Open(dc) => {
+                if self.mode != BusMode::Idle {
+                    warn!("Open called when the bus was in state {}", self.mode);
                 }
-                _ => warn!("Must set device to listen mode before open/close"),
+
+                // Now expect a write_data, followed by an Unlisten
+                // Therefore we consider the Bus in Listening mode
+                self.mode = BusMode::Listening(dc);
+            }
+            BusCommand::Close(_) => {
+                if self.mode != BusMode::Idle {
+                    warn!("Close called when the bus was in state {}", self.mode);
+                }
+
+                // The bus is now Idle
+                self.mode = BusMode::Idle;
+            }
+            BusCommand::Listen(dc) => {
+                if self.mode != BusMode::Idle {
+                    warn!("Listen called when bus was in state {}", self.mode);
+                }
+
+                // Ths bus is now Listening
+                self.mode = BusMode::Listening(dc);
+            }
+            BusCommand::Unlisten => {
+                if let BusMode::Listening(_) = self.mode {
+                    // Do nothing
+                } else {
+                    warn!("Unisten called when bus was in state {}", self.mode);
+                }
+
+                // Ths bus is now idle
+                self.mode = BusMode::Idle;
+            }
+            BusCommand::Talk(dc) => {
+                if self.mode != BusMode::Idle {
+                    warn!("Talk called when bus was in state {}", self.mode);
+                }
+
+                // Ths bus is now Talking
+                self.mode = BusMode::Talking(dc);
+            }
+            BusCommand::Untalk => {
+                if let BusMode::Talking(_) = self.mode {
+                    // Do nothing
+                } else {
+                    warn!("Unisten called when bus was in state {}", self.mode);
+                }
+
+                // Ths bus is now idle
+                self.mode = BusMode::Idle;
             }
         }
-
-        // Check for mode conflicts
-        if let Some(warning) = command.conflicts_with(&self.mode) {
-            match &self.mode {
-                BusMode::Talking(dc) | BusMode::Listening(dc) => {
-                    warn!("{} {}:{}", warning, dc.device(), dc.channel());
-                }
-                BusMode::Idle => {
-                    warn!("{}", warning);
-                }
-            }
-        }
-
-        // Update mode before executing command
-        self.mode = command.next_mode();
 
         // Execute the command
         trace!("{}", command.trace_message());

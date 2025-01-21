@@ -577,7 +577,7 @@ impl Device {
             }
         }
 
-        debug!("Read {} bytes", bytes_read);
+        trace!("Read {} bytes", bytes_read);
         Ok(bytes_read)
     }
 
