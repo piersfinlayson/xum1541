@@ -59,7 +59,7 @@ pub const BULK_IN_ENDPOINT: u8 = 3 | LIBUSB_ENDPOINT_IN;
 pub const BULK_OUT_ENDPOINT: u8 = 4 | LIBUSB_ENDPOINT_OUT;
 
 /// Size of XUM1541 status response
-pub const STATUS_BUF_SIZE_SIZE: usize = 3;
+pub const STATUS_BUF_SIZE: usize = 3;
 /// Size of XUM1541's devinfo response - used for each of the debug info strings
 pub const DEV_INFO_SIZE: usize = 8;
 /// Maximum data transfer size supported by the XUM1541
@@ -151,3 +151,66 @@ pub const DRIVE_MAX_FREE_CHANNEL: u8 = 14;
 
 /// Drive's command channel, used for commands like `M-W` and `M-R`
 pub const DRIVE_COMMAND_CHANNEL: u8 = 15;
+
+/// Ioctls supported by [`crate::Device::ioctl`]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Ioctl {
+    GetEoi = 23,
+    ClearEoi = 24,
+    PpRead = 25,
+    PpWrite = 26,
+    IecPoll = 27,
+    IecWait = 28,
+    IecSetRelease = 29,
+    ParburstRead = 30,
+    ParburstWrite = 31,
+    SrqburstRead = 32,
+    SrqburstWrite = 33,
+    TapMotorOn = 66,
+    TapGetVer = 67,
+    TapPrepareCapture = 68,
+    TapPrepareWrite = 69,
+    TapGetSense = 70,
+    TapWaitForStopSense = 71,
+    TapWaitForPlaySense = 72,
+    TapMotorOff = 73,
+}
+
+impl Ioctl {
+    /// Whether the Ioctl is an asyncronous one
+    pub fn is_async(&self) -> bool {
+        *self == Self::IecWait
+    }
+
+    /// Whether the Ioctl is a syncronous one
+    pub fn is_sync(&self) -> bool {
+        !self.is_async()
+    }
+}
+
+impl std::fmt::Display for Ioctl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GetEoi => write!(f, "GetEoi"),
+            Self::ClearEoi => write!(f, "ClearEoi"),
+            Self::PpRead => write!(f, "PpRead"),
+            Self::PpWrite => write!(f, "PpWrite"),
+            Self::IecPoll => write!(f, "IecPoll"),
+            Self::IecWait => write!(f, "IecWait"),
+            Self::IecSetRelease => write!(f, "IecSetRelease"),
+            Self::ParburstRead => write!(f, "ParburstRead"),
+            Self::ParburstWrite => write!(f, "ParburstWrite"),
+            Self::SrqburstRead => write!(f, "SrqburstRead"),
+            Self::SrqburstWrite => write!(f, "SrqburstWrite"),
+            Self::TapMotorOn => write!(f, "TapMotorOn"),
+            Self::TapGetVer => write!(f, "TapGetVer"),
+            Self::TapPrepareCapture => write!(f, "TapPrepareCapture"),
+            Self::TapPrepareWrite => write!(f, "TapPrepareWrite"),
+            Self::TapGetSense => write!(f, "TapGetSense"),
+            Self::TapWaitForStopSense => write!(f, "TapWaitForStopSense"),
+            Self::TapWaitForPlaySense => write!(f, "TapWaitForPlaySense"),
+            Self::TapMotorOff => write!(f, "TapMotorOff"),
+        }
+    }
+}

@@ -6,7 +6,7 @@ authors = ["Piers Finlayson <piers@piers.rocks>"]
 description = "Rust driver to access Commodore disk drives using XUM1541 USB device"
 repository  = "https://github.com/piersfinlayson/xum1541"
 license = "GPL-3.0"
-documentation = "https://docs.rs/rxum1541"
+documentation = "https://docs.rs/xum1541"
 keywords = ["commodore", "disk", "1541", "opencbm", "retro"]
 categories = [
     "hardware-support",
@@ -24,9 +24,6 @@ path = "src/lib.rs"
 rusb = "0.9"
 thiserror = "2.0"
 log = "0.4"
-tokio = { version = "1", features = ["full"] }
-futures = "0.3"
 
 [dev-dependencies]
-tokio-test = "0.4"
 env_logger = "0.11"  # Required by examples

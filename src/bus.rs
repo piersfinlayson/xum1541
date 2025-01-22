@@ -12,11 +12,12 @@ use log::{debug, error, info, trace, warn};
 use rusb::{Context, UsbContext};
 use std::time::Duration;
 
-/// Default Bus timeout - currently unused
+/// Default Bus timeout - currently unused, but may be passed to [`Bus::new`]
+/// and [`BusBuilder::timeout`]
 pub const DEFAULT_BUS_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// The [`Bus`] struct is the main interface for accessing Commodore disk drives.
-/// It provides key bus-level primitives, such as
+/// The [`Bus`] struct is the main interface for accessing Commodore disk
+/// drives.  it provides key bus-level primitives.
 /// * new (create the [`Bus`] object and associated [`Device`] object)
 /// * reset (this bus)
 /// * read (from the bus)
@@ -27,6 +28,7 @@ pub const DEFAULT_BUS_TIMEOUT: Duration = Duration::from_secs(60);
 /// * close (close a file on a drive)
 /// * untalk
 /// * unlisten
+/// * ioctl (sends an ioctl to the XUM1541 device)
 ///
 /// Use [`BusBuilder`] to create a new [`Bus`] (and [`Device`]) instance.
 #[derive(Debug)]
@@ -41,8 +43,8 @@ impl Bus {
     /// Creates a new bus instance. Use if you have manually created a [`Device`] instance.
     ///
     /// # Args:
-    /// * device: Device - the device to use for communication
-    /// * timeout: Duration - the timeout for bus operations, currently unused
+    /// * device: - the device to use for communication
+    /// * timeout: - the timeout for bus operations, currently unused
     ///
     /// # Returns:
     /// * [`Bus`] - the new bus instance
@@ -51,9 +53,9 @@ impl Bus {
     ///
     /// # Example
     /// ```no_run
-    /// use xum1541::{Bus, Device};
-    /// let device = Device::new(0).unwrap();
-    /// let mut bus = Bus::new(device, std::time::Duration::from_secs(60));
+    /// use xum1541::{Bus, Device, DEFAULT_BUS_TIMEOUT};
+    /// let device = Device::new(None).unwrap();  // serial_num = None to auto select device
+    /// let mut bus = Bus::new(device, DEFAULT_BUS_TIMEOUT);
     /// // Now initialize both the Bus and Device simultaneously
     /// bus.initialize();
     /// ```
@@ -87,7 +89,7 @@ impl Bus {
     pub fn reset(&mut self) -> Result<(), Xum1541Error> {
         trace!("Entered Bus::reset");
         self.mode = BusMode::Idle;
-        self.device.control_write(CTRL_RESET, 0, &[])
+        self.device.write_control(CTRL_RESET, 0, &[])
     }
 
     /// Instruct a drive to talk on the bus.
@@ -296,7 +298,47 @@ impl Bus {
         self.device.write_data(PROTO_CBM, buf)
     }
 
-    /// Retrieve the underlying Device context.
+    /// Sends an ioctl command to the device.  Reads status from the device
+    /// after sending, except where the Ioctl is asyncronous
+    ///
+    /// # Arguments
+    /// * `ioctl` - The request_type of type [`crate::constants::Ioctl`]
+    /// * `address` - The address to target with this ioctl.  May be 0.
+    /// * `secondary_address` - The secondary to target with this ioctl. May be 0.
+    ///
+    /// # Returns
+    /// * `Ok(Option<u16>)` - 2 byte status from the device, or None for an asyncronous ioctl, as this function does not wait after async ioctl
+    /// * `Err(Xum1541Error)` - On failure
+    /// 
+    /// Note - this function may be deprecated in a future version, and replaced
+    /// with specific functions for required ioctls
+    pub fn ioctl(
+        &self,
+        ioctl: Ioctl,
+        address: u8,
+        secondary_address: u8,
+    ) -> Result<Option<u16>, Xum1541Error> {
+        self.device.ioctl(ioctl, address, secondary_address)
+    }
+
+    /// Waits for status from the XUM1541 device, after certain commands and
+    /// ioctls.
+    ///
+    /// This will block, so should be used with care.  Consider spawning a
+    /// thread for this call, especially if waiting for status after an
+    /// asyncronous ioctl.
+    ///
+    /// It is unlikely that this will be needed unless an asyncronous
+    /// [`crate::constants::Ioctl`] is issued.
+    ///
+    /// # Returns
+    /// `Ok(u16)` - the 2 byte status value from the device
+    /// `Err(Xum1541Error)` - the error on failure
+    pub fn wait_for_status(&self) -> Result<u16, Xum1541Error> {
+        self.device.wait_for_status()
+    }
+
+    /// Retrieve the underlying [`Device`] context.
     ///
     /// May be used to share with other rusb instances, and to set the log
     /// level of rusb.
@@ -505,16 +547,16 @@ impl Bus {
 ///     .build()
 ///     .unwrap();
 /// ```
-/// 
+///
 /// # A more complex example
 ///
 /// ```no_run
-/// use xum1541::BusBuilder;
+/// use xum1541::{BusBuilder, DEFAULT_BUS_TIMEOUT};
 /// use std::time::Duration;
 ///
 /// let bus = BusBuilder::new()
 ///     .serial_number(1)
-///     .timeout(std::time::Duration::from_secs(60))
+///     .timeout(DEFAULT_BUS_TIMEOUT)
 ///     .build()
 ///     .unwrap();
 /// ```
@@ -580,7 +622,7 @@ impl BusBuilder {
     /// using rusb::LogLevel.
     ///
     /// # Args:
-    /// * context - the [`rusb::Context`]` to use
+    /// * context - the [`rusb::Context`] to use
     ///
     /// # Returns
     /// * `Self` - builder instance for method chaining
@@ -588,18 +630,18 @@ impl BusBuilder {
     /// ```rust,no_run
     /// use rusb::{Context, UsbContext};
     /// use xum1541::BusBuilder;
-    /// 
+    ///
     /// let mut context = Context::new().unwrap();
     /// context.set_log_level(rusb::LogLevel::Debug);
-    /// 
+    ///
     /// let bus = BusBuilder::new()
     ///     .context(context)
     ///     .build()
     ///     .unwrap();
     /// ```
-    /// 
+    ///
     /// # Note:
-    /// If not set, a new default [`rusb::Context`]` will be created with LogLevel::Info
+    /// If not set, a new default [`rusb::Context`] will be created with LogLevel::Info
     pub fn context(mut self, context: Context) -> Self {
         self.context = Some(context);
         self
@@ -613,24 +655,23 @@ impl BusBuilder {
     ///
     /// # Example
     /// See [`BusBuilder`]
-    /// 
+    ///
     /// # Notes:
     /// * Uses default values for any parameters that weren't set:
     ///   * serial_number: 0 (take first device found)
     ///   * timeout: [`DEFAULT_BUS_TIMEOUT`]
     ///   * context: new Context with LogLevel::Info
-    /// * Will create a new Device unless one was explicitly provided
+    /// * Will create a new [`Device`] unless one was explicitly provided
     pub fn build(&mut self) -> Result<Bus, Xum1541Error> {
-        // Create Device
-        let xum_serial_number = self.xum_serial_number.unwrap_or(0);
+        // Create the Device
         let device = if self.device.is_none() {
             if self.context.is_some() {
                 let context = self.context.take().unwrap();
-                Device::with_context(context, xum_serial_number)?
+                Device::with_context(context, self.xum_serial_number)?
             } else {
                 let mut context = rusb::Context::new()?;
                 context.set_log_level(rusb::LogLevel::Info);
-                Device::with_context(context, xum_serial_number)?
+                Device::with_context(context, self.xum_serial_number)?
             }
         } else {
             self.device.take().unwrap()

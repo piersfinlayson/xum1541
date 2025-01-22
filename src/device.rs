@@ -44,7 +44,7 @@ impl Default for DeviceDebugInfo {
 pub struct DeviceInfo {
     /// Product [`String`] from the USB device
     pub product: String,
-    /// Manufacturer [`String`]` from the USB device
+    /// Manufacturer [`String`] from the USB device
     pub manufacturer: Option<String>,
     /// Serial number [`String`] from the USB device
     pub serial_number: Option<String>,
@@ -143,7 +143,7 @@ impl Device {
     /// to configure the USB context.
     ///
     /// # Arguments
-    /// * `serial_num` - Serial number to match, or 0 to use first available device
+    /// * `serial_num` - Serial number to match, or None to use first available device
     ///
     /// # Returns
     /// * `Ok(Device)` - Successfully created device instance
@@ -155,14 +155,16 @@ impl Device {
     ///
     /// ```rust,no_run
     /// use xum1541::Device;
-    /// // Create device using first available (serial_num = 0)
     ///
-    /// let device = Device::new(0).unwrap();
+    /// // Create device using first available (serial_num = None)
+    /// let device = Device::new(None).unwrap();
     ///
     /// // Now do device.init().unwrap(); etc
     /// ```
-    pub fn new(serial_num: u8) -> Result<Self, Xum1541Error> {
-        trace!("Device::new serial_num {serial_num}");
+    ///
+    /// Note that the created [`rusb::Context`] will not have rusb logging enabled.
+    pub fn new(serial_num: Option<u8>) -> Result<Self, Xum1541Error> {
+        trace!("Device::new serial_num {serial_num:?}");
         let context = Context::new()?;
         Self::with_context(context, serial_num)
     }
@@ -172,7 +174,7 @@ impl Device {
     ///
     /// # Arguments
     /// * `context` - The USB context to use for device operations
-    /// * `serial_number` - Device serial number to match, or 0 to use first device found
+    /// * `serial_number` - Device serial number to match, or None to use first device found
     ///
     /// # Returns
     /// * `Ok(Device)` - Successfully created device instance
@@ -189,13 +191,13 @@ impl Device {
     /// let mut context = rusb::Context::new().unwrap();
     /// context.set_log_level(rusb::LogLevel::Info);
     ///
-    /// // Create device using first available (serial_num = 0)
-    /// let device = Device::with_context(context, 0).unwrap();
+    /// // Create device using first available (serial_num = None)
+    /// let device = Device::with_context(context, None).unwrap();
     ///
     /// // Now do device.init().unwrap(); etc
     /// ```
-    pub fn with_context(context: Context, serial_num: u8) -> Result<Self, Xum1541Error> {
-        trace!("Device::with_context context {context:?} serial_num {serial_num}");
+    pub fn with_context(context: Context, serial_num: Option<u8>) -> Result<Self, Xum1541Error> {
+        trace!("Device::with_context context {context:?} serial_num {serial_num:?}");
         let (_device, handle) = Self::find_device(&context, serial_num)?;
 
         Ok(Self {
@@ -268,14 +270,17 @@ impl Device {
     /// # Returns
     /// * `Ok(usize)` - On success, with the number of bytes read
     /// * `Err(Xum1541Error)` - On failure
-    pub fn control_read(
+    ///
+    /// Note that the calling function must provide a large enough buffer for
+    /// the response, or some bytes may not be read.
+    pub fn read_control(
         &self,
         request: u8,
         value: u16,
         buffer: &mut [u8],
     ) -> Result<usize, Xum1541Error> {
         trace!(
-            "Device::control_read request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
+            "Device::read_control request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
         );
 
@@ -285,12 +290,13 @@ impl Device {
             | constants::LIBUSB_ENDPOINT_IN;
 
         // Perform control transfer and return number of bytes read
+        let index = 0; // default control endpoint
         self.handle
             .read_control(
                 REQUEST_TYPE,
                 request,
                 value,
-                0, // index
+                index,
                 buffer,
                 DEFAULT_CONTROL_TIMEOUT,
             )
@@ -309,14 +315,14 @@ impl Device {
     /// # Returns
     /// * `Ok(())` - On success
     /// * `Err(Xum1541Error)` - On failure
-    pub fn control_write(
+    pub fn write_control(
         &self,
         request: u8,
         value: u16,
         buffer: &[u8],
     ) -> Result<(), Xum1541Error> {
         trace!(
-            "Device::control_write request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
+            "Device::write_control request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
         );
         const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
@@ -324,11 +330,12 @@ impl Device {
             | constants::LIBUSB_ENDPOINT_OUT;
 
         // Send control transfer
+        let index = 0; // default control endpoint
         self.handle.write_control(
             REQUEST_TYPE,
             request,
             value,
-            0, // index
+            index,
             buffer,
             DEFAULT_CONTROL_TIMEOUT,
         )?;
@@ -337,28 +344,34 @@ impl Device {
         // down or called reset
         if (request != CTRL_SHUTDOWN) && (request != CTRL_RESET) {
             // Wait for status response
-            self.wait_status()?;
+            self.wait_for_status()?;
         }
 
         trace!("Exited control_write - success");
         Ok(())
     }
 
-    /// Sends a command to the device.  Reads status from the device after sending
+    /// Sends an ioctl command to the device.  Reads status from the device
+    /// after sending, except where the Ioctl is asyncronous
     ///
     /// # Arguments
-    /// * `cmd` - The request_type byte
-    /// * `device` - The Commodore device to target with this cmd
-    /// * `channel` - The Commodore device channel to target with this cmd
+    /// * `ioctl` - The request_type of type [`crate::constants::Ioctl`]
+    /// * `address` - The address to target with this ioctl.  May be 0.
+    /// * `secondary_address` - The secondary to target with this ioctl. May be 0.
     ///
     /// # Returns
-    /// * `Ok(u16)` - 2 byte status from the device
+    /// * `Ok(Option<u16>)` - 2 byte status from the device, or None for an asyncronous ioctl, as this function does not wait after async ioctl
     /// * `Err(Xum1541Error)` - On failure
-    pub fn command_only(&self, cmd: u8, device: u8, channel: u8) -> Result<u16, Xum1541Error> {
-        trace!("Device::command_only cmd 0x{cmd:02x} device {device} channel {channel}");
+    pub fn ioctl(
+        &self,
+        ioctl: Ioctl,
+        address: u8,
+        secondary_address: u8,
+    ) -> Result<Option<u16>, Xum1541Error> {
+        trace!("Device::ioctl {ioctl} address {address} secondary_address {secondary_address}");
 
         // Build 4-byte command buffer
-        let cmd_buf = [cmd, device, channel, 0u8];
+        let cmd_buf = [ioctl as u8, address, secondary_address, 0u8];
 
         // Send command
         match self
@@ -367,16 +380,22 @@ impl Device {
         {
             Ok(_) => {
                 trace!(
-                    "Successfully send command 0x{cmd:02x} to device {device} channel {channel}",
+                    "Successfully sent ioctl {ioctl} to address {address} secondary_address {secondary_address}",
                 );
                 ()
             }
             Err(e) => {
-                warn!("Failed to send command 0x{cmd:02x} to device {device} channel {channel}",);
+                warn!("Failed to send ioctl {ioctl} to address {address} secondary_address {secondary_address}",);
                 return Err(e.into());
             }
         }
-        self.wait_status()
+        if ioctl.is_sync() {
+            debug!("ioctl {ioctl} is syncronous, waiting for status");
+            Ok(Some(self.wait_for_status()?))
+        } else {
+            debug!("ioctl {ioctl} is asyncronous, not waiting for status");
+            Ok(None)
+        }
     }
 
     /// Writes data to the device
@@ -433,7 +452,7 @@ impl Device {
 
         // For CBM protocol, wait for status
         if (mode & PROTO_MASK) == PROTO_CBM {
-            let status = self.wait_status()?;
+            let status = self.wait_for_status()?;
             trace!("Retrieved status {:04x}", status);
             Ok(status as usize)
         } else {
@@ -500,6 +519,92 @@ impl Device {
         trace!("Read {} bytes", bytes_read);
         Ok(bytes_read)
     }
+
+    /// Waits for status from the XUM1541 device, after certain commands and
+    /// ioctls.
+    ///
+    /// This will block, so should be used with care.  Consider spawning a
+    /// thread for this call, especially if waiting for status after an
+    /// asyncronous ioctl.
+    ///
+    /// # Returns
+    /// `Ok(u16)` - the 2 byte status value from the device
+    /// `Err(Xum1541Error)` - the error on failure
+    pub fn wait_for_status(&self) -> Result<u16, Xum1541Error> {
+        trace!("Device::wait_for_status");
+
+        let mut status_buf = vec![0u8; STATUS_BUF_SIZE];
+        loop {
+            trace!("Read bulk endpoint 0x{:02x}", BULK_IN_ENDPOINT);
+            match self
+                .handle
+                .read_bulk(BULK_IN_ENDPOINT, &mut status_buf, DEFAULT_READ_TIMEOUT)
+            {
+                // The XUM1541 status response continues of 3 bytes
+                // The 1st byte is the status of the response - which can be
+                // * IO_READY
+                // * IO_BUSY
+                // * IO_ERROR
+                //
+                // IO_READY signifies the status value has been provided.
+                // IO_BUSY means the device is busy, and the request shouild
+                // be retried.
+                // IO_ERROR is a failure condition
+                //
+                // The status value is provied as bytes 2-3 of the response.
+                // With low byte followed by high byte
+                Ok(len) if len == STATUS_BUF_SIZE => {
+                    let status = Self::get_status(&status_buf);
+
+                    match status {
+                        IO_READY => {
+                            let status = Self::get_status_val(&status_buf);
+                            debug!("Got status value 0x{:04x}", status);
+                            break Ok(status);
+                        }
+                        IO_BUSY => {
+                            trace!("Device busy");
+                            let _ = sleep(DEFAULT_USB_LOOP_SLEEP);
+                            continue;
+                        }
+                        IO_ERROR => {
+                            trace!("Device IO error");
+                            break Err(Communication {
+                                message: "Device returned IO error".into(),
+                            });
+                        }
+                        num => {
+                            warn!("Unexpected status from device {}", num);
+                            break Err(Communication {
+                                message: format!("Unexpected error from device {}", num),
+                            });
+                        }
+                    }
+                }
+                Ok(len) => {
+                    trace!(
+                        "Device returned unexpected number of status bytes {} vs {}",
+                        len,
+                        STATUS_BUF_SIZE
+                    );
+                    break Err(Communication {
+                        message: format!("Device returned wrong number of status bytes {}", len),
+                    });
+                }
+                Err(e) => match e {
+                    e @ rusb::Error::Timeout => {
+                        debug!("Timeout waiting for device status {}", e);
+                        let _ = sleep(DEFAULT_USB_LOOP_SLEEP);
+                        continue;
+                    }
+                    other_error => {
+                        debug!("Error reading from USB device {}", other_error);
+                        break Err(other_error.into());
+                    }
+                },
+            }
+        }
+    }
 }
 
 /// Private Device functions
@@ -507,12 +612,12 @@ impl Device {
     /// Enumerate the bus, find the appropriate device and open it
     fn find_device(
         context: &Context,
-        serial_num: u8,
+        serial_num: Option<u8>,
     ) -> Result<(RusbDevice<Context>, RusbDeviceHandle<Context>), Xum1541Error> {
-        trace!("Device::find_device context {context:?} serial_num {serial_num}");
+        trace!("Device::find_device context {context:?} serial_num {serial_num:?}");
 
-        let mut found_any_xum1541 = false;
         let mut found_serial_nums = vec![];
+        let serial_num = serial_num.unwrap_or(0);
         for device in context.devices()?.iter() {
             let device_desc = device.device_descriptor()?;
             debug!(
@@ -523,12 +628,11 @@ impl Device {
 
             if device_desc.vendor_id() == XUM1541_VID && device_desc.product_id() == XUM1541_PID {
                 debug!("Found XUM1541 device");
-                found_any_xum1541 = true;
                 let handle = device.open()?;
 
                 // Try and read the serial number, whether we are looking for
                 // it or not
-                trace!("Port number requested {}", serial_num);
+                trace!("Port number requested {serial_num:?}");
                 match handle.read_serial_number_string_ascii(&device_desc) {
                     Ok(serial) => {
                         if let Ok(num) = serial.parse::<u8>() {
@@ -555,26 +659,23 @@ impl Device {
             }
         }
 
-        let err = match found_any_xum1541 {
-            true => {
-                error!("No matching XUM1541 device found, but found non-matching serial");
-                DeviceAccess {
-                    kind: SerialMismatch {
-                        vid: XUM1541_VID,
-                        pid: XUM1541_PID,
-                        actual: found_serial_nums,
-                        expected: serial_num,
-                    },
-                }
+        let err = if found_serial_nums.len() > 0 {
+            error!("No matching XUM1541 device found {serial_num}, but found non-matching serial(s) {found_serial_nums:?}");
+            DeviceAccess {
+                kind: SerialMismatch {
+                    vid: XUM1541_VID,
+                    pid: XUM1541_PID,
+                    actual: found_serial_nums,
+                    expected: serial_num,
+                },
             }
-            false => {
-                error!("No suitable XUM1541 device found");
-                DeviceAccess {
-                    kind: NotFound {
-                        vid: XUM1541_VID,
-                        pid: XUM1541_PID,
-                    },
-                }
+        } else {
+            error!("No suitable XUM1541 device found");
+            DeviceAccess {
+                kind: NotFound {
+                    vid: XUM1541_VID,
+                    pid: XUM1541_PID,
+                },
             }
         };
         Err(err)
@@ -670,70 +771,6 @@ impl Device {
         u16::from(buf[2]) << 8 | u16::from(buf[1])
     }
 
-    fn wait_status(&self) -> Result<u16, Xum1541Error> {
-        trace!("Device::wait_status");
-
-        let mut status_buf = vec![0u8; STATUS_BUF_SIZE_SIZE];
-        loop {
-            trace!("Read bulk endpoint 0x{:02x}", BULK_IN_ENDPOINT);
-            match self
-                .handle
-                .read_bulk(BULK_IN_ENDPOINT, &mut status_buf, DEFAULT_READ_TIMEOUT)
-            {
-                Ok(len) if len == STATUS_BUF_SIZE_SIZE => {
-                    let status = Self::get_status(&status_buf);
-
-                    match status {
-                        IO_READY => {
-                            let status = Self::get_status_val(&status_buf);
-                            debug!("Got status value 0x{:04x}", status);
-                            break Ok(status);
-                        }
-                        IO_BUSY => {
-                            // Device busy, keep polling
-                            trace!("Device busy");
-                            let _ = sleep(DEFAULT_USB_LOOP_SLEEP);
-                            continue;
-                        }
-                        IO_ERROR => {
-                            trace!("Device IO error");
-                            break Err(Communication {
-                                message: "Device returned IO error".into(),
-                            });
-                        }
-                        num => {
-                            warn!("Unexpected debug status {}", num);
-                            break Err(Communication {
-                                message: format!("Unexpected error from device {}", num),
-                            });
-                        }
-                    }
-                }
-                Ok(len) => {
-                    trace!(
-                        "Device returned wrong number of bytes {} vs {}",
-                        len,
-                        STATUS_BUF_SIZE_SIZE
-                    );
-                    break Err(Communication {
-                        message: format!("Device returned wrong number of status bytes {}", len),
-                    });
-                }
-                Err(e) => match e {
-                    e @ rusb::Error::Timeout => {
-                        debug!("Timeout waiting for device status {}", e);
-                        let _ = sleep(DEFAULT_USB_LOOP_SLEEP);
-                        continue;
-                    }
-                    other_error => {
-                        debug!("Error reading from USB device {}", other_error);
-                        break Err(other_error.into());
-                    }
-                },
-            }
-        }
-    }
-
     /// Verify device identity and set up initial configuration
     fn verify_and_setup_device(&mut self) -> Result<DeviceInfo, Xum1541Error> {
         trace!("Device::verify_and_setup_device");
@@ -802,7 +839,7 @@ impl Device {
     fn read_basic_info(&mut self, initial_info: &DeviceInfo) -> Result<DeviceInfo, Xum1541Error> {
         trace!("Device::read_basic_info initial_info {initial_info:?}");
         let mut info_buf = [0u8; DEV_INFO_SIZE];
-        let len = self.control_read(CTRL_INIT as u8, 0, &mut info_buf)?;
+        let len = self.read_control(CTRL_INIT as u8, 0, &mut info_buf)?;
 
         trace!(
             "Control transfer succeeded, got {} bytes: {:?}",
@@ -880,7 +917,7 @@ impl Device {
             "Device::read_debug_command cmd {cmd} info_buf.len() {}",
             info_buf.len()
         );
-        match self.control_read(cmd, 0, info_buf) {
+        match self.read_control(cmd, 0, info_buf) {
             Ok(len) if len > 0 => from_utf8(info_buf)
                 .map(|s| s.trim_matches(char::from(0)).to_string())
                 .map_err(|_| InternalError::DeviceInfo {
@@ -928,7 +965,7 @@ impl Drop for Device {
     fn drop(&mut self) {
         trace!("Device::drop");
         // Send shutdown command - ignoring errors since we're in drop
-        let _ = self.control_write(CTRL_SHUTDOWN, 0, &[]);
+        let _ = self.write_control(CTRL_SHUTDOWN, 0, &[]);
 
         // Release interface - again ignoring errors
         let _ = self.handle.release_interface(0);
@@ -942,13 +979,24 @@ mod tests {
 
     #[test]
     fn test_device_not_found() {
-        let result = Device::new(99);
+        let result = Device::new(Some(99));
+        println!("{result:?}");
         assert!(matches!(
+            // If no XUM1541 is connected
             result,
             Err(DeviceAccess {
                 kind: NotFound {
                     vid: XUM1541_VID,
                     pid: XUM1541_PID
+                }
+            }) |
+            // If a device with serial anything other than 99 is connected
+            Err(DeviceAccess {
+                kind: SerialMismatch {
+                    vid: XUM1541_VID,
+                    pid: XUM1541_PID,
+                    actual: _,
+                    expected: 99
                 }
             })
         ));
