@@ -1,3 +1,7 @@
+//! The [`Device`] module provides the low-level interface to the XUM1541 USB adapter.  Prefer [`crate::Bus`] for most use cases.
+//!
+//! It is unlikely you need to use this interface directly unless you are
+//! re-implementing [`crate::Bus`] or adding to it.
 #[allow(unused_imports)]
 use crate::constants::*;
 use crate::error::InternalError;
@@ -13,10 +17,15 @@ use std::cmp::min;
 use std::str::from_utf8;
 use std::thread::sleep;
 
+/// DeviceDebugInfo contains some additional data from XUM1541 supporting
+/// firmware version 8 and onwards.
 #[derive(Debug)]
 pub struct DeviceDebugInfo {
+    /// Git revision of the code the device firmware was built from
     pub git_rev: Option<String>,
+    /// AVR gcc version the device firmware was built with
     pub gcc_ver: Option<String>,
+    /// AVR libc version the device firmware was built with
     pub libc_ver: Option<String>,
 }
 
@@ -30,18 +39,27 @@ impl Default for DeviceDebugInfo {
     }
 }
 
+/// DeviceInfo contains information read from the XUM1541 device.
 #[derive(Debug)]
 pub struct DeviceInfo {
+    /// Product [`String`] from the USB device
     pub product: String,
+    /// Manufacturer [`String`]` from the USB device
     pub manufacturer: Option<String>,
+    /// Serial number [`String`] from the USB device
     pub serial_number: Option<String>,
+    /// Firmware version from the USB device
     pub firmware_version: u8,
+    /// Capabilities from the USB device.  Use [`DeviceInfo::print_capabilities`] to get a human readable list of these
     pub capabilities: u8,
+    /// Status retrieved from the device at initialization.  Use [`DeviceInfo::print_status`] to get a human readable list of any flags
     pub status: u8,
+    /// Debug information from the device, if available
     pub debug_info: Option<DeviceDebugInfo>,
 }
 
 impl DeviceInfo {
+    /// Prints DeviceInfo to stdout in a human-readable format
     pub fn print_capabilities(&self) {
         let capability_flags = [
             (CAP_CBM, "CBM commands"),
@@ -62,6 +80,7 @@ impl DeviceInfo {
         }
     }
 
+    /// Prints Device status to stdout in a human-readable format
     pub fn print_status(&self) {
         let status_flags = [
             (STATUS_DOING_RESET, "Device wasn't cleanly shutdown"),
@@ -80,6 +99,8 @@ impl DeviceInfo {
         }
     }
 
+    /// Prints the device debug information to stdout in a human-readable format,
+    /// if present
     pub fn print_debug(&self) {
         if let Some(debug_info) = &self.debug_info {
             if let Some(rev) = &debug_info.git_rev {
@@ -97,33 +118,82 @@ impl DeviceInfo {
     }
 }
 
+/// Device represents the physical XUM1541 USB adapter.
+///
+/// It is unlikely to be necessary to implement directly using this struct
+/// as [`crate::Bus`] provides Commodore IEC/IEEE-488 primitives and a slightly higher
+/// level interface, exposing the key functionality of the device.
+///
+/// Instead of using [`Device::new`] or [`Device::with_context()`], it is recommended
+/// to use [`crate::BusBuilder::build`], which will create both the Bus object, and at the
+/// same time the Device object.  You can configure the Device object via
+/// [`crate::BusBuilder`] if needed.
 #[derive(Debug)]
-
 pub struct Device {
     handle: RusbDeviceHandle<Context>,
     info: Option<DeviceInfo>,
     context: Context,
 }
 
+/// Public Device functions
 impl Device {
+    /// Creates a new Device using a default USB context.
+    ///
+    /// This is a simpler alternative to [`Device::with_context`] when you don't need
+    /// to configure the USB context.
+    ///
+    /// # Arguments
+    /// * `serial_num` - Serial number to match, or 0 to use first available device
+    ///
+    /// # Returns
+    /// * `Ok(Device)` - Successfully created device instance
+    /// * `Err(Xum1541Error)` - If device creation fails (no device found or USB error)
+    ///
+    /// Note that the Device returned has not been initialized.  It must be
+    /// initialized before use with [`Device::init`].
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use xum1541::Device;
+    /// // Create device using first available (serial_num = 0)
+    ///
+    /// let device = Device::new(0).unwrap();
+    ///
+    /// // Now do device.init().unwrap(); etc
+    /// ```
     pub fn new(serial_num: u8) -> Result<Self, Xum1541Error> {
         trace!("Device::new serial_num {serial_num}");
-        let mut context = Context::new()?;
-        context.set_log_level(rusb::LogLevel::Debug);
+        let context = Context::new()?;
         Self::with_context(context, serial_num)
     }
 
-    pub fn context(&self) -> &Context {
-        trace!("Device::context");
-        &self.context
-    }
-
-    pub fn info(&self) -> Option<&DeviceInfo> {
-        trace!("Device::info");
-        self.info.as_ref()
-    }
-
-    /// Create new device connection with provided context
+    /// Create a Device with provided [`rusb::Context`]. Helpful if you want
+    /// to configure rusb logging.  Otherwise use [`Device::new`].
+    ///
+    /// # Arguments
+    /// * `context` - The USB context to use for device operations
+    /// * `serial_number` - Device serial number to match, or 0 to use first device found
+    ///
+    /// # Returns
+    /// * `Ok(Device)` - Successfully created device instance
+    /// * `Err(Xum1541Error)` - If device creation fails (no device found or USB error)
+    ///
+    /// Note that the Device returned has not been initialized.  It must be
+    /// initialized before use with [`Device::init`].
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use rusb::{Context, UsbContext};
+    /// use xum1541::Device;
+    ///
+    /// let mut context = rusb::Context::new().unwrap();
+    /// context.set_log_level(rusb::LogLevel::Info);
+    ///
+    /// // Create device using first available (serial_num = 0)
+    /// let device = Device::with_context(context, 0).unwrap();
+    ///
+    /// // Now do device.init().unwrap(); etc
+    /// ```
     pub fn with_context(context: Context, serial_num: u8) -> Result<Self, Xum1541Error> {
         trace!("Device::with_context context {context:?} serial_num {serial_num}");
         let (_device, handle) = Self::find_device(&context, serial_num)?;
@@ -135,12 +205,305 @@ impl Device {
         })
     }
 
+    /// Initialize the Device.
+    ///
+    /// This function
+    /// * reads XUM1541 information
+    /// * performs a hard reset of the USB device (to make sure it is in a
+    ///   clean state)
+    /// * resets the device if the device indicates it was shut down uncleanly (which is unlikely but not impossible at it performs a hard reset first)
+    ///
+    /// # Returns
+    /// * `Ok(())` - Successfully initialized device
+    /// * `Err(Xum1541Error)` - If device initialization fails
     pub fn init(&mut self) -> Result<(), Xum1541Error> {
         trace!("Device::init");
         self.info = Some(self.initialize_device()?);
         Ok(())
     }
 
+    /// Returns the [`DeviceInfo`] as an [`Option<&DeviceInfo>`].
+    ///
+    /// May be None, in which case the Device has not been initialized
+    pub fn info(&self) -> Option<&DeviceInfo> {
+        trace!("Device::info");
+        self.info.as_ref()
+    }
+
+    /// Returns a refernce to the Context stored within this device
+    pub fn context(&self) -> &Context {
+        trace!("Device::context");
+        &self.context
+    }
+
+    /// Do a hard reset of the USB device, and reinitialize it afterwards.
+    ///
+    /// Use with caution, as this function can fail, in which case you may be
+    /// in a worse state than before, as if it fails you will be left with an
+    /// un-initialized device.
+    ///
+    /// The [`DeviceInfo`] may change during this process.
+    ///
+    /// # Returns
+    /// * `Ok(())` - If successful
+    /// * `Err(Xum1541Error)` - On error
+    pub fn hard_reset_and_re_init(&mut self) -> Result<(), Xum1541Error> {
+        trace!("Device::hard_reset_and_re_init");
+        // Drop the info - this will be reinitialized shortly
+        // Resetting the device doesn't require this
+        self.info = None;
+
+        self.hard_reset_pre_init()?;
+
+        self.init()
+    }
+
+    /// Sends a control message and reads the response
+    ///
+    /// # Arguments
+    /// * `request` - The request_type byte
+    /// * `value` - The 2 byte request value
+    /// * `buffer` - A buffer which will be filled in with the read data
+    ///
+    /// # Returns
+    /// * `Ok(usize)` - On success, with the number of bytes read
+    /// * `Err(Xum1541Error)` - On failure
+    pub fn control_read(
+        &self,
+        request: u8,
+        value: u16,
+        buffer: &mut [u8],
+    ) -> Result<usize, Xum1541Error> {
+        trace!(
+            "Device::control_read request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
+            buffer.len()
+        );
+
+        // Class-specific request, device as recipient, with IN direction
+        const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
+            | constants::LIBUSB_RECIPIENT_ENDPOINT
+            | constants::LIBUSB_ENDPOINT_IN;
+
+        // Perform control transfer and return number of bytes read
+        self.handle
+            .read_control(
+                REQUEST_TYPE,
+                request,
+                value,
+                0, // index
+                buffer,
+                DEFAULT_CONTROL_TIMEOUT,
+            )
+            .map_err(|e| e.into())
+    }
+
+    /// Sends a control message and attempts to retrieve the status from the
+    /// device.  It does not attempt to retrieve status if SHUTDOWN or RESET
+    /// was issued, as this would likely hang.
+    ///
+    /// # Arguments
+    /// * `request` - The request_type byte
+    /// * `value` - The 2 byte request value
+    /// * `buffer` - A buffer with any additional data to send
+    ///
+    /// # Returns
+    /// * `Ok(())` - On success
+    /// * `Err(Xum1541Error)` - On failure
+    pub fn control_write(
+        &self,
+        request: u8,
+        value: u16,
+        buffer: &[u8],
+    ) -> Result<(), Xum1541Error> {
+        trace!(
+            "Device::control_write request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
+            buffer.len()
+        );
+        const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
+            | constants::LIBUSB_RECIPIENT_ENDPOINT
+            | constants::LIBUSB_ENDPOINT_OUT;
+
+        // Send control transfer
+        self.handle.write_control(
+            REQUEST_TYPE,
+            request,
+            value,
+            0, // index
+            buffer,
+            DEFAULT_CONTROL_TIMEOUT,
+        )?;
+
+        // Device doesn't seem to want to respond to use if we've shut it
+        // down or called reset
+        if (request != CTRL_SHUTDOWN) && (request != CTRL_RESET) {
+            // Wait for status response
+            self.wait_status()?;
+        }
+
+        trace!("Exited control_write - success");
+        Ok(())
+    }
+
+    /// Sends a command to the device.  Reads status from the device after sending
+    ///
+    /// # Arguments
+    /// * `cmd` - The request_type byte
+    /// * `device` - The Commodore device to target with this cmd
+    /// * `channel` - The Commodore device channel to target with this cmd
+    ///
+    /// # Returns
+    /// * `Ok(u16)` - 2 byte status from the device
+    /// * `Err(Xum1541Error)` - On failure
+    pub fn command_only(&self, cmd: u8, device: u8, channel: u8) -> Result<u16, Xum1541Error> {
+        trace!("Device::command_only cmd 0x{cmd:02x} device {device} channel {channel}");
+
+        // Build 4-byte command buffer
+        let cmd_buf = [cmd, device, channel, 0u8];
+
+        // Send command
+        match self
+            .handle
+            .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)
+        {
+            Ok(_) => {
+                trace!(
+                    "Successfully send command 0x{cmd:02x} to device {device} channel {channel}",
+                );
+                ()
+            }
+            Err(e) => {
+                warn!("Failed to send command 0x{cmd:02x} to device {device} channel {channel}",);
+                return Err(e.into());
+            }
+        }
+        self.wait_status()
+    }
+
+    /// Writes data to the device
+    ///
+    /// Will attempt to write all data, but will return the amount written on
+    /// success, even if all the data could not be written.
+    ///
+    /// # Argumemts
+    /// * `mode` - Mode, one of xum1541::PROTO_*, see [`constants`]
+    /// * `data` - Data to write
+    ///
+    /// # Returns
+    /// * `Ok(usize)` - On success, number of bytes written
+    /// * `Err(Xum1541Error>` - On failure
+    pub fn write_data(&self, mode: u8, data: &[u8]) -> Result<usize, Xum1541Error> {
+        let size = data.len();
+        trace!("Device::write_data mode b{mode:08b} data.len() {size}");
+
+        // Validate inputs
+        if size > MAX_XFER_SIZE {
+            warn!(
+                "Attempted to write {size} more than max supported number of bytes {MAX_XFER_SIZE}"
+            );
+            return Err(Args { message: format!("Attempted to write {size} more than max supported number of bytes {MAX_XFER_SIZE}") });
+        }
+
+        // Send the write command with 4-byte command buffer
+        let cmd_buf = [WRITE, mode, (size & 0xff) as u8, ((size >> 8) & 0xff) as u8];
+
+        self.handle
+            .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)?;
+
+        // Write the actual data in chunks
+        let mut bytes_written = 0;
+        let mut data_slice = &data.as_ref()[..size];
+
+        while bytes_written < size {
+            let chunk_size = min(MAX_XFER_SIZE, size - bytes_written);
+            let chunk = &data_slice[..chunk_size];
+
+            let written =
+                self.handle
+                    .write_bulk(BULK_OUT_ENDPOINT, chunk, DEFAULT_WRITE_TIMEOUT)?;
+
+            // If we wrote less than requested, we're done
+            if written < chunk_size {
+                bytes_written += written;
+                break;
+            }
+
+            bytes_written += written;
+            data_slice = &data_slice[written..];
+        }
+
+        // For CBM protocol, wait for status
+        if (mode & PROTO_MASK) == PROTO_CBM {
+            let status = self.wait_status()?;
+            trace!("Retrieved status {:04x}", status);
+            Ok(status as usize)
+        } else {
+            Ok(bytes_written)
+        }
+    }
+
+    /// Reads data from the device
+    ///
+    /// Will attempt to read data to fill the provided buffer but will stop
+    /// and return the size read if the device stops sending data.  Will also
+    /// stop if buffer is filled up.
+    ///
+    /// # Argumemts
+    /// * `mode` - Mode, one of xum1541::PROTO_*
+    /// * `data` - Data to write
+    ///
+    /// # Returns
+    /// * `Ok(usize)` - On success, number of bytes written
+    /// * `Err(Xum1541Error>` - On failure
+    pub fn read_data(&self, mode: u8, buffer: &mut [u8]) -> Result<usize, Xum1541Error> {
+        let size = buffer.len();
+        trace!("Device::read_data mode b{mode:08b} buffer.len() {size}");
+
+        // Check inputs
+        if size > MAX_XFER_SIZE {
+            warn!(
+                "Attempted to read {size} more than max supported number of bytes {MAX_XFER_SIZE}"
+            );
+            return Err(Args { message: format!("Attempted to read {size} more than max supported number of bytes {MAX_XFER_SIZE}") });
+        }
+        let buf_len = buffer.len();
+        if size > buf_len {
+            warn!("Attempted to read {size} more than buffer length {buf_len}");
+            return Err(Args {
+                message: format!("Attempted to read {size} more than buffer length {buf_len}"),
+            });
+        }
+
+        // Send read command with 4-byte command buffer
+        let cmd_buf = [READ, mode, (size & 0xff) as u8, ((size >> 8) & 0xff) as u8];
+
+        self.handle
+            .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)?;
+
+        // Read data in chunks
+        let mut bytes_read = 0;
+        while bytes_read < size {
+            let chunk_size = std::cmp::min(MAX_XFER_SIZE, size - bytes_read);
+            let chunk = &mut buffer.as_mut()[bytes_read..bytes_read + chunk_size];
+
+            let read = self
+                .handle
+                .read_bulk(BULK_IN_ENDPOINT, chunk, DEFAULT_READ_TIMEOUT)?;
+
+            bytes_read += read;
+
+            // If we read less than requested, transfer is done
+            if read < chunk_size {
+                break;
+            }
+        }
+
+        trace!("Read {} bytes", bytes_read);
+        Ok(bytes_read)
+    }
+}
+
+/// Private Device functions
+impl Device {
     /// Enumerate the bus, find the appropriate device and open it
     fn find_device(
         context: &Context,
@@ -163,31 +526,31 @@ impl Device {
                 found_any_xum1541 = true;
                 let handle = device.open()?;
 
-                // Check serial number if serial_num specified
-                if serial_num > 0 {
-                    trace!("Port number requested {}", serial_num);
-                    match handle.read_serial_number_string_ascii(&device_desc) {
-                        Ok(serial) => {
-                            debug!("Device serial number: {}", serial);
-                            if let Ok(num) = serial.parse::<u8>() {
-                                if num == serial_num {
-                                    info!("Found device with matching serial number");
-                                    return Ok((device, handle));
-                                }
-                                found_serial_nums.push(num);
-                                debug!(
-                                    "Serial number {} didn't match requested {}",
-                                    num, serial_num
-                                );
+                // Try and read the serial number, whether we are looking for
+                // it or not
+                trace!("Port number requested {}", serial_num);
+                match handle.read_serial_number_string_ascii(&device_desc) {
+                    Ok(serial) => {
+                        if let Ok(num) = serial.parse::<u8>() {
+                            if num == serial_num {
+                                info!("Found device with matching serial number {num}");
+                                return Ok((device, handle));
                             }
-                        }
-                        Err(e) => {
-                            warn!("Couldn't read device serial number: {}", e)
+                            found_serial_nums.push(num);
+                            debug!(
+                                "Device serial number {num} didn't match requested {serial_num}",
+                            );
                         }
                     }
-                } else {
-                    debug!("Taking first available device");
-                    return Ok((device, handle));
+                    Err(e) => {
+                        warn!("Couldn't read device serial number: {}", e);
+                        if serial_num == 0 {
+                            // Despite failing to read the serial number
+                            // we can still use the device if serial
+                            // 0 was specified
+                            return Ok((device, handle));
+                        }
+                    }
                 }
             }
         }
@@ -215,23 +578,6 @@ impl Device {
             }
         };
         Err(err)
-    }
-
-    /// Do a hard reset of the USB device.
-    ///
-    /// This function can fail, in which case you may be in a worse state
-    /// than before.
-    ///
-    /// DeviceInfo may change during this process.
-    pub fn hard_reset_and_re_init(&mut self) -> Result<(), Xum1541Error> {
-        trace!("Device::hard_reset_and_re_init");
-        // Drop the info - this will be reinitialized shortly
-        // Resetting the device doesn't require this
-        self.info = None;
-
-        self.hard_reset_pre_init()?;
-
-        self.init()
     }
 
     // The device must be (re) initialized after this function.  It is
@@ -324,115 +670,17 @@ impl Device {
         u16::from(buf[2]) << 8 | u16::from(buf[1])
     }
 
-    pub fn control_write(
-        &self,
-        request: u8,
-        value: u16,
-        buffer: &[u8],
-    ) -> Result<(), Xum1541Error> {
-        trace!(
-            "Device::control_write request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
-            buffer.len()
-        );
-        const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
-            | constants::LIBUSB_RECIPIENT_ENDPOINT
-            | constants::LIBUSB_ENDPOINT_OUT;
-
-        // Send control transfer
-        self.handle.write_control(
-            REQUEST_TYPE,
-            request,
-            value,
-            0, // index
-            buffer,
-            DEFAULT_CONTROL_TIMEOUT,
-        )?;
-
-        // Device doesn't seem to want to respond to use if we've shut it
-        // down or called reset
-        if (request != CTRL_SHUTDOWN) && (request != CTRL_RESET) {
-            // Wait for status response
-            self.wait_status()?;
-        }
-
-        trace!("Exited control_write - success");
-        Ok(())
-    }
-
-    /// Implements xum1541_control_mg - reading type
-    pub fn control_read(
-        &self,
-        request: u8,
-        value: u16,
-        buffer: &mut [u8],
-    ) -> Result<usize, Xum1541Error> {
-        trace!(
-            "Device::control_read request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
-            buffer.len()
-        );
-
-        // Class-specific request, device as recipient, with IN direction
-        const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
-            | constants::LIBUSB_RECIPIENT_ENDPOINT
-            | constants::LIBUSB_ENDPOINT_IN;
-
-        // Perform control transfer and return number of bytes read
-        self.handle
-            .read_control(
-                REQUEST_TYPE,
-                request,
-                value,
-                0, // index
-                buffer,
-                DEFAULT_CONTROL_TIMEOUT,
-            )
-            .map_err(|e| e.into())
-    }
-
-    /// Implements IOctl()
-    pub fn command_only(&self, cmd: u8, addr: u8, secaddr: u8) -> Result<u16, Xum1541Error> {
-        trace!("Device::command_only cmd 0x{cmd:02x} addr 0x{addr:02x} secaddr 0x{secaddr:02x}");
-
-        // Build 4-byte command buffer
-        let cmd_buf = [cmd, addr, secaddr, 0u8];
-
-        // Send command
-        match self
-            .handle
-            .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)
-        {
-            Ok(_) => {
-                trace!(
-                    "Successfully send command {} to device {} {}",
-                    cmd,
-                    addr,
-                    secaddr
-                );
-                ()
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to send command {} to device {} {}",
-                    cmd, addr, secaddr
-                );
-                return Err(e.into());
-            }
-        }
-
-        self.wait_status()
-    }
-
     fn wait_status(&self) -> Result<u16, Xum1541Error> {
         trace!("Device::wait_status");
 
-        let mut status_buf = vec![0u8; XUM_STATUSBUF_SIZE];
+        let mut status_buf = vec![0u8; STATUS_BUF_SIZE_SIZE];
         loop {
             trace!("Read bulk endpoint 0x{:02x}", BULK_IN_ENDPOINT);
             match self
                 .handle
                 .read_bulk(BULK_IN_ENDPOINT, &mut status_buf, DEFAULT_READ_TIMEOUT)
             {
-                Ok(len) if len == XUM_STATUSBUF_SIZE => {
+                Ok(len) if len == STATUS_BUF_SIZE_SIZE => {
                     let status = Self::get_status(&status_buf);
 
                     match status {
@@ -465,7 +713,7 @@ impl Device {
                     trace!(
                         "Device returned wrong number of bytes {} vs {}",
                         len,
-                        XUM_STATUSBUF_SIZE
+                        STATUS_BUF_SIZE_SIZE
                     );
                     break Err(Communication {
                         message: format!("Device returned wrong number of status bytes {}", len),
@@ -484,101 +732,6 @@ impl Device {
                 },
             }
         }
-    }
-
-    /// Writes data to the device
-    pub fn write_data(&self, mode: u8, data: &[u8]) -> Result<usize, Xum1541Error> {
-        let size = data.len();
-        trace!("Device::write_data mode b{mode:08b} data.len() {size}");
-
-        // Validate inputs
-        if size > XUM_MAX_XFER_SIZE {
-            warn!("Attempted to write {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}");
-            return Err(Args { message: format!("Attempted to write {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}") });
-        }
-
-        // Send the write command with 4-byte command buffer
-        let cmd_buf = [WRITE, mode, (size & 0xff) as u8, ((size >> 8) & 0xff) as u8];
-
-        self.handle
-            .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)?;
-
-        // Write the actual data in chunks
-        let mut bytes_written = 0;
-        let mut data_slice = &data.as_ref()[..size];
-
-        while bytes_written < size {
-            let chunk_size = min(XUM_MAX_XFER_SIZE, size - bytes_written);
-            let chunk = &data_slice[..chunk_size];
-
-            let written =
-                self.handle
-                    .write_bulk(BULK_OUT_ENDPOINT, chunk, DEFAULT_WRITE_TIMEOUT)?;
-
-            // If we wrote less than requested, we're done
-            if written < chunk_size {
-                bytes_written += written;
-                break;
-            }
-
-            bytes_written += written;
-            data_slice = &data_slice[written..];
-        }
-
-        // For CBM protocol, wait for status
-        if (mode & PROTO_MASK) == PROTO_CBM {
-            let status = self.wait_status()?;
-            trace!("Retrieved status {:04x}", status);
-            Ok(status as usize)
-        } else {
-            Ok(bytes_written)
-        }
-    }
-
-    /// Reads data from the device
-    pub fn read_data(&self, mode: u8, buffer: &mut [u8]) -> Result<usize, Xum1541Error> {
-        let size = buffer.len();
-        trace!("Device::read_data mode b{mode:08b} buffer.len() {size}");
-
-        // Check inputs
-        if size > XUM_MAX_XFER_SIZE {
-            warn!("Attempted to read {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}");
-            return Err(Args { message: format!("Attempted to read {size} more than max supported number of bytes {XUM_MAX_XFER_SIZE}") });
-        }
-        let buf_len = buffer.len();
-        if size > buf_len {
-            warn!("Attempted to read {size} more than buffer length {buf_len}");
-            return Err(Args {
-                message: format!("Attempted to read {size} more than buffer length {buf_len}"),
-            });
-        }
-
-        // Send read command with 4-byte command buffer
-        let cmd_buf = [READ, mode, (size & 0xff) as u8, ((size >> 8) & 0xff) as u8];
-
-        self.handle
-            .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)?;
-
-        // Read data in chunks
-        let mut bytes_read = 0;
-        while bytes_read < size {
-            let chunk_size = std::cmp::min(XUM_MAX_XFER_SIZE, size - bytes_read);
-            let chunk = &mut buffer.as_mut()[bytes_read..bytes_read + chunk_size];
-
-            let read = self
-                .handle
-                .read_bulk(BULK_IN_ENDPOINT, chunk, DEFAULT_READ_TIMEOUT)?;
-
-            bytes_read += read;
-
-            // If we read less than requested, transfer is done
-            if read < chunk_size {
-                break;
-            }
-        }
-
-        trace!("Read {} bytes", bytes_read);
-        Ok(bytes_read)
     }
 
     /// Verify device identity and set up initial configuration
@@ -648,7 +801,7 @@ impl Device {
     /// Read basic device information
     fn read_basic_info(&mut self, initial_info: &DeviceInfo) -> Result<DeviceInfo, Xum1541Error> {
         trace!("Device::read_basic_info initial_info {initial_info:?}");
-        let mut info_buf = [0u8; XUM_DEVINFO_SIZE];
+        let mut info_buf = [0u8; DEV_INFO_SIZE];
         let len = self.control_read(CTRL_INIT as u8, 0, &mut info_buf)?;
 
         trace!(
@@ -695,7 +848,7 @@ impl Device {
         trace!("Device::read_debug_info");
         let ver_cmds = [CTRL_GITREV, CTRL_GCCVER, CTRL_LIBCVER];
         let mut debug_info = DeviceDebugInfo::default();
-        let mut info_buf = [0u8; XUM_DEVINFO_SIZE];
+        let mut info_buf = [0u8; DEV_INFO_SIZE];
 
         // Process each command independently, ignoring failures
         for cmd in ver_cmds {

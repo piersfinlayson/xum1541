@@ -1,3 +1,4 @@
+//! Error objects for the xum1541 crate
 use thiserror::Error;
 
 /// Error type for the xum1541 crate
