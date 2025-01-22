@@ -515,7 +515,7 @@ impl Bus {
                 if let BusMode::Talking(_) = self.mode {
                     // Do nothing
                 } else {
-                    warn!("Unisten called when bus was in state {}", self.mode);
+                    warn!("Untalk called when bus was in state {}", self.mode);
                 }
 
                 // Ths bus is now idle
