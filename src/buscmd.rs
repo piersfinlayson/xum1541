@@ -198,16 +198,4 @@ impl BusCommand {
             BusCommand::Close(dc) => dc.as_close_bytes(),
         }
     }
-
-    /// Used to trace the command for debugging purposes
-    pub fn trace_message(&self) -> &'static str {
-        match self {
-            BusCommand::Talk(_) => "Entered Bus::talk",
-            BusCommand::Listen(_) => "Entered Bus::listen",
-            BusCommand::Untalk => "Entered Bus::untalk",
-            BusCommand::Unlisten => "Entered Bus::unlisten",
-            BusCommand::Open(_) => "Entered Bus::open",
-            BusCommand::Close(_) => "Entered Bus::close",
-        }
-    }
 }

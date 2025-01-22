@@ -284,7 +284,7 @@ impl Bus {
     /// # Note
     /// Will warn if bus is in talking mode when this is called.
     pub fn write(&self, buf: &[u8]) -> Result<usize, Xum1541Error> {
-        trace!("Entered Bus::write");
+        trace!("Entered Bus::write buf.len(): {}", buf.len());
         let size = buf.len();
         if size == 0 {
             warn!("Attempt to write 0 bytes");
@@ -320,6 +320,34 @@ impl Bus {
     ) -> Result<Option<u16>, Xum1541Error> {
         self.device.ioctl(ioctl, address, secondary_address)
     }
+
+    /// Get EOI from the bus
+    /// 
+    /// # Returns
+    /// - `u16` - On success, a 2 byte status from the device
+    /// - `Xum1541Error` - On failure, including if there is no status 
+    /// response (because GetEoi is a syncronous command, hence we expect a status)
+    pub fn get_eoi(&self) -> Result<u16, Xum1541Error> {
+        trace!("Bus::get_eoi");
+        self.device.ioctl(Ioctl::GetEoi, 0, 0)?
+            .ok_or(Xum1541Error::Communication {
+                message: "Get EOI failed".to_string(),
+            })
+    } 
+
+    /// Clear EOI on the bus
+    /// 
+    /// # Returns
+    /// - `u16` - On success, a 2 byte status from the device
+    /// - `Xum1541Error` - On failure, including if there is no status 
+    /// response (because GetEoi is a syncronous command, hence we expect a status)
+    pub fn clear_eoi(&self) -> Result<u16, Xum1541Error> {
+        trace!("Bus::clear_eoi");
+        self.device.ioctl(Ioctl::ClearEoi, 0, 0)?
+            .ok_or(Xum1541Error::Communication {
+                message: "Clear EOI failed".to_string(),
+            })
+    } 
 
     /// Waits for status from the XUM1541 device, after certain commands and
     /// ioctls.
@@ -473,8 +501,9 @@ impl Bus {
                     warn!("Open called when the bus was in state {}", self.mode);
                 }
 
-                // Now expect a write_data, followed by an Unlisten
-                // Therefore we consider the Bus in Listening mode
+                // An open is followed by a write for the filename followed
+                // an unlisten.  Hence we consider an open to put the bus into
+                // listen mode.
                 self.mode = BusMode::Listening(dc);
             }
             BusCommand::Close(_) => {
@@ -482,8 +511,7 @@ impl Bus {
                     warn!("Close called when the bus was in state {}", self.mode);
                 }
 
-                // The bus is now Idle
-                self.mode = BusMode::Idle;
+                // A close isn't a bus state - it's a device statue.
             }
             BusCommand::Listen(dc) => {
                 if self.mode != BusMode::Idle {
@@ -524,7 +552,7 @@ impl Bus {
         }
 
         // Execute the command
-        trace!("{}", command.trace_message());
+        debug!("Bus:execute_command {command}");
         self.device
             .write_data(command.protocol(), &command.command_bytes())
             .map(|_| ())

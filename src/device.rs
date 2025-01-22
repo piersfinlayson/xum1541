@@ -559,7 +559,7 @@ impl Device {
                     match status {
                         IO_READY => {
                             let status = Self::get_status_val(&status_buf);
-                            debug!("Got status value 0x{:04x}", status);
+                            trace!("Got status value 0x{:04x}", status);
                             break Ok(status);
                         }
                         IO_BUSY => {

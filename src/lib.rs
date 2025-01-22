@@ -238,3 +238,4 @@ pub use crate::bus::{Bus, BusBuilder, DEFAULT_BUS_TIMEOUT};
 pub use crate::buscmd::DeviceChannel;
 pub use crate::device::*;
 pub use crate::error::{DeviceAccessKind, Xum1541Error};
+pub use crate::constants::Ioctl;
