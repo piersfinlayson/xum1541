@@ -505,6 +505,8 @@ impl Bus {
 ///     .build()
 ///     .unwrap();
 /// ```
+/// 
+/// # A more complex example
 ///
 /// ```no_run
 /// use xum1541::BusBuilder;
@@ -583,6 +585,19 @@ impl BusBuilder {
     /// # Returns
     /// * `Self` - builder instance for method chaining
     ///
+    /// ```rust,no_run
+    /// use rusb::{Context, UsbContext};
+    /// use xum1541::BusBuilder;
+    /// 
+    /// let mut context = Context::new().unwrap();
+    /// context.set_log_level(rusb::LogLevel::Debug);
+    /// 
+    /// let bus = BusBuilder::new()
+    ///     .context(context)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    /// 
     /// # Note:
     /// If not set, a new default [`rusb::Context`]` will be created with LogLevel::Info
     pub fn context(mut self, context: Context) -> Self {
@@ -596,6 +611,9 @@ impl BusBuilder {
     /// * `Ok(Bus)` - the constructed Bus instance if successful
     /// * `Err(Xum1541Error)` - if an error occurred during construction
     ///
+    /// # Example
+    /// See [`BusBuilder`]
+    /// 
     /// # Notes:
     /// * Uses default values for any parameters that weren't set:
     ///   * serial_number: 0 (take first device found)
