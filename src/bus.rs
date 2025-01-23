@@ -309,7 +309,7 @@ impl Bus {
     /// # Returns
     /// * `Ok(Option<u16>)` - 2 byte status from the device, or None for an asyncronous ioctl, as this function does not wait after async ioctl
     /// * `Err(Xum1541Error)` - On failure
-    /// 
+    ///
     /// Note - this function may be deprecated in a future version, and replaced
     /// with specific functions for required ioctls
     pub fn ioctl(
@@ -322,32 +322,34 @@ impl Bus {
     }
 
     /// Get EOI from the bus
-    /// 
+    ///
     /// # Returns
     /// - `u16` - On success, a 2 byte status from the device
-    /// - `Xum1541Error` - On failure, including if there is no status 
+    /// - `Xum1541Error` - On failure, including if there is no status
     /// response (because GetEoi is a syncronous command, hence we expect a status)
     pub fn get_eoi(&self) -> Result<u16, Xum1541Error> {
         trace!("Bus::get_eoi");
-        self.device.ioctl(Ioctl::GetEoi, 0, 0)?
+        self.device
+            .ioctl(Ioctl::GetEoi, 0, 0)?
             .ok_or(Xum1541Error::Communication {
                 message: "Get EOI failed".to_string(),
             })
-    } 
+    }
 
     /// Clear EOI on the bus
-    /// 
+    ///
     /// # Returns
     /// - `u16` - On success, a 2 byte status from the device
-    /// - `Xum1541Error` - On failure, including if there is no status 
+    /// - `Xum1541Error` - On failure, including if there is no status
     /// response (because GetEoi is a syncronous command, hence we expect a status)
     pub fn clear_eoi(&self) -> Result<u16, Xum1541Error> {
         trace!("Bus::clear_eoi");
-        self.device.ioctl(Ioctl::ClearEoi, 0, 0)?
+        self.device
+            .ioctl(Ioctl::ClearEoi, 0, 0)?
             .ok_or(Xum1541Error::Communication {
                 message: "Clear EOI failed".to_string(),
             })
-    } 
+    }
 
     /// Waits for status from the XUM1541 device, after certain commands and
     /// ioctls.
