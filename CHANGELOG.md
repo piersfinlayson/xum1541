@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Bus::get_eoi and Bus::clear_eoi functions
 - Removed BusCommand::trace_message
+- Xum1541Error::DeviceAccessKind::NoDevice, for other libaries to use when there is no Xum1541 connected to
+- Added Xum1541Error::to_errno()
 
 ### Changed
 

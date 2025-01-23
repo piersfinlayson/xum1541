@@ -1,5 +1,6 @@
 //! Error objects for the xum1541 crate
 use thiserror::Error;
+use libc::{EACCES, EINVAL, EIO, ENODEV, ENOENT, ETIMEDOUT};
 
 /// Error type for the xum1541 crate
 #[derive(Debug, Error, PartialEq)]
@@ -34,6 +35,9 @@ pub enum Xum1541Error {
 /// XUM1541 device
 #[derive(Debug, Error, PartialEq)]
 pub enum DeviceAccessKind {
+    #[error("The library is not connected to an XUM1541")]
+    NoDevice,
+
     #[error("XUM1541 device {vid:04x}/{pid:04x} not found - is it connected and do you have permissions to access it?")]
     NotFound { vid: u16, pid: u16 },
 
@@ -52,6 +56,25 @@ pub enum DeviceAccessKind {
 
     #[error("Hit USB permissions error while attempting to access XUM1541 device.  Are you sure you have suitable permissions?  You may need to reconfigure udev rules in /etc/udev/rules.d/.")]
     Permission,
+}
+
+impl Xum1541Error {
+    pub fn to_errno(&self) -> i32 {
+        match self {
+            Xum1541Error::Usb { .. } => EIO,
+            Xum1541Error::Init { .. } => EIO,
+            Xum1541Error::Communication { .. } => EIO,
+            Xum1541Error::Timeout { .. } => ETIMEDOUT,
+            Xum1541Error::DeviceAccess { kind } => match kind {
+                DeviceAccessKind::NoDevice { .. } => ENODEV,
+                DeviceAccessKind::NotFound { .. } => ENOENT,
+                DeviceAccessKind::SerialMismatch { .. } => ENOENT,
+                DeviceAccessKind::FirmwareVersion { .. } => ENODEV,
+                DeviceAccessKind::Permission { .. } => EACCES,
+            },
+            Xum1541Error::Args { .. } => EINVAL,
+        }
+    }
 }
 
 /// Used for errors which must remain internal to the xum1541 crate

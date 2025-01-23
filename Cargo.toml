@@ -24,6 +24,7 @@ path = "src/lib.rs"
 rusb = "0.9"
 thiserror = "2.0"
 log = "0.4"
+libc = "0.2"
 
 [dev-dependencies]
 env_logger = "0.11"  # Required by examples
