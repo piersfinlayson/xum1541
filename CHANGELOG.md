@@ -1,7 +1,7 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [0.2.0] - 2025-01-??
+## [0.2.0] - 2025-01-24
 ### Added
 - Bus::get_eoi and Bus::clear_eoi functions
 - Removed BusCommand::trace_message
