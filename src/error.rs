@@ -1,14 +1,15 @@
 //! Error objects for the xum1541 crate
 use libc::{EACCES, EINVAL, EIO, ENODEV, ENOENT, ETIMEDOUT};
 use thiserror::Error;
+use serde::{Serialize, Deserialize};
 
 /// Error type for the xum1541 crate
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
 pub enum Xum1541Error {
     /// Errors accessing the USB device
     /// Note that permission problems are explicitly handled in the DeviceAccessKind
     #[error("USB error while attempting to commuicate with the XUM1541: {0}")]
-    Usb(#[from] rusb::Error),
+    Usb(SerializableUsbError),
 
     /// Failure in initializing the XUM1541 device
     #[error("XUM1541 device initialization failed: {message}")]
@@ -33,7 +34,7 @@ pub enum Xum1541Error {
 
 /// Used to differentiate between different types of problems accessing the
 /// XUM1541 device
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
 pub enum DeviceAccessKind {
     #[error("The library is not connected to an XUM1541")]
     NoDevice,
@@ -56,6 +57,12 @@ pub enum DeviceAccessKind {
 
     #[error("Hit USB permissions error while attempting to access XUM1541 device.  Are you sure you have suitable permissions?  You may need to reconfigure udev rules in /etc/udev/rules.d/.")]
     Permission,
+}
+
+#[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
+pub enum SerializableUsbError {
+    #[error("{message}")]
+    UsbError { message: String }
 }
 
 impl Xum1541Error {
@@ -82,7 +89,7 @@ impl Xum1541Error {
 /// We do not use this error for all internal functions - but will if we have
 /// specific, handled, internal errors to deal with and we want to prevent them
 /// from escaping
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Serialize, Deserialize)]
 pub enum InternalError {
     #[error("Invalid device information: {message}")]
     DeviceInfo { message: String },
@@ -104,5 +111,14 @@ impl From<rusb::Error> for InternalError {
         InternalError::PublicError {
             error: error.into(),
         }
+    }
+}
+
+// Map rusb::Error to Xum1541Error
+impl From<rusb::Error> for Xum1541Error {
+    fn from(err: rusb::Error) -> Self {
+        Self::Usb(SerializableUsbError::UsbError { 
+            message: err.to_string() 
+        })
     }
 }
