@@ -4,7 +4,7 @@ use crate::constants::{
     PROTO_WRITE_ATN, PROTO_WRITE_TALK,
 };
 
-use crate::Xum1541Error;
+use crate::Error;
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
 use std::fmt;
@@ -19,7 +19,7 @@ pub struct DeviceChannel {
 
 impl DeviceChannel {
     /// Create a new DeviceChannel object
-    pub fn new(device: u8, channel: u8) -> Result<Self, Xum1541Error> {
+    pub fn new(device: u8, channel: u8) -> Result<Self, Error> {
         match Self::validate(device, channel) {
             Ok(()) => Ok(Self { device, channel }),
             Err(e) => Err(e),
@@ -36,29 +36,29 @@ impl DeviceChannel {
         self.channel
     }
 
-    fn validate(device: u8, channel: u8) -> Result<(), Xum1541Error> {
+    fn validate(device: u8, channel: u8) -> Result<(), Error> {
         trace!("DeviceChannel::validate: device {device} and channel {channel}");
 
         if device < MIN_DEVICE_NUM {
             trace!("Device {device} below minimum {MIN_DEVICE_NUM}");
-            Err(Xum1541Error::Args {
+            Err(Error::Args {
                 message: format!("Device number {device} is less than minimum {MIN_DEVICE_NUM}"),
             })
         } else if device > MAX_DEVICE_NUM {
             trace!("Device {device} above maximum {MAX_DEVICE_NUM}");
-            Err(Xum1541Error::Args {
+            Err(Error::Args {
                 message: format!("Device number {device} is greater than maximum {MAX_DEVICE_NUM}"),
             })
         } else if channel < DRIVE_MIN_CHANNEL {
             trace!("Channel {channel} below minimum {DRIVE_MIN_CHANNEL}");
-            Err(Xum1541Error::Args {
+            Err(Error::Args {
                 message: format!(
                     "Channel number {channel} is less than minimum {DRIVE_MIN_CHANNEL}"
                 ),
             })
         } else if channel > DRIVE_MAX_CHANNEL {
             trace!("Channel {channel} above maximum {DRIVE_MAX_CHANNEL}");
-            Err(Xum1541Error::Args {
+            Err(Error::Args {
                 message: format!(
                     "Channel number {channel} is greater than maximum {DRIVE_MAX_CHANNEL}"
                 ),

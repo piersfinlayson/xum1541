@@ -3,10 +3,10 @@
 use crate::buscmd::{BusCommand, BusMode, DeviceChannel};
 #[allow(unused_imports)]
 use crate::constants::*;
-#[allow(unused_imports)]
-use crate::Xum1541Error::{self, *};
-use crate::{Device, DeviceInfo};
 use crate::error::CommunicationKind;
+#[allow(unused_imports)]
+use crate::Error::{self, *};
+use crate::{Device, DeviceInfo};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -73,11 +73,11 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(())` - if successful
-    /// * `Err(Xum1541Error)` - if an error occurred
+    /// * `Err(Error)` - if an error occurred
     ///
     /// # Example
     /// See [`Bus::new`]
-    pub fn initialize(&mut self) -> Result<(), Xum1541Error> {
+    pub fn initialize(&mut self) -> Result<(), Error> {
         trace!("Bus::initialize");
         self.device.init()
     }
@@ -86,8 +86,8 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(())` - if successful
-    /// * `Err(Xum1541Error)` - if an error occurred
-    pub fn reset(&mut self) -> Result<(), Xum1541Error> {
+    /// * `Err(Error)` - if an error occurred
+    pub fn reset(&mut self) -> Result<(), Error> {
         trace!("Entered Bus::reset");
         self.mode = BusMode::Idle;
         self.device.write_control(CTRL_RESET, 0, &[])
@@ -100,8 +100,8 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(())` - if successful
-    /// * `Err(Xum1541Error)` - if an error occurred
-    pub fn talk(&mut self, dc: DeviceChannel) -> Result<(), Xum1541Error> {
+    /// * `Err(Error)` - if an error occurred
+    pub fn talk(&mut self, dc: DeviceChannel) -> Result<(), Error> {
         self.execute_command(BusCommand::Talk(dc))
     }
 
@@ -112,8 +112,8 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(())` - if successful
-    /// * `Err(Xum1541Error)` - if an error occurred
-    pub fn listen(&mut self, dc: DeviceChannel) -> Result<(), Xum1541Error> {
+    /// * `Err(Error)` - if an error occurred
+    pub fn listen(&mut self, dc: DeviceChannel) -> Result<(), Error> {
         self.execute_command(BusCommand::Listen(dc))
     }
 
@@ -121,8 +121,8 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(())` - if successful
-    /// * `Err(Xum1541Error)` - if an error occurred
-    pub fn untalk(&mut self) -> Result<(), Xum1541Error> {
+    /// * `Err(Error)` - if an error occurred
+    pub fn untalk(&mut self) -> Result<(), Error> {
         self.execute_command(BusCommand::Untalk)
     }
 
@@ -130,8 +130,8 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(())` - if successful
-    /// * `Err(Xum1541Error)` - if an error occurred
-    pub fn unlisten(&mut self) -> Result<(), Xum1541Error> {
+    /// * `Err(Error)` - if an error occurred
+    pub fn unlisten(&mut self) -> Result<(), Error> {
         self.execute_command(BusCommand::Unlisten)
     }
 
@@ -143,8 +143,8 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(())` - if successful
-    /// * `Err(Xum1541Error)` - if an error occurred
-    pub fn open(&mut self, dc: DeviceChannel) -> Result<(), Xum1541Error> {
+    /// * `Err(Error)` - if an error occurred
+    pub fn open(&mut self, dc: DeviceChannel) -> Result<(), Error> {
         self.execute_command(BusCommand::Open(dc))
     }
 
@@ -155,8 +155,8 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(())` - if successful
-    /// * `Err(Xum1541Error)` - if an error occurred
-    pub fn close(&mut self, dc: DeviceChannel) -> Result<(), Xum1541Error> {
+    /// * `Err(Error)` - if an error occurred
+    pub fn close(&mut self, dc: DeviceChannel) -> Result<(), Error> {
         self.execute_command(BusCommand::Close(dc))
     }
 
@@ -167,11 +167,11 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(usize)` - number of bytes read if successful
-    /// * `Err(Xum1541Error)` - if an error occurred
+    /// * `Err(Error)` - if an error occurred
     ///
     /// # Note
     /// Will warn if bus is in listening mode when this is called.
-    pub fn read(&self, buf: &mut [u8]) -> Result<usize, Xum1541Error> {
+    pub fn read(&self, buf: &mut [u8]) -> Result<usize, Error> {
         trace!("Entered Bus::read buf.len(): {}", buf.len());
         Self::validate_read_params(buf, None, false)?;
         if let BusMode::Listening(_) = self.mode {
@@ -188,11 +188,11 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(usize)` - number of bytes read (including the pattern if found)
-    /// * `Err(Xum1541Error)` - if an error occurred or invalid parameters
+    /// * `Err(Error)` - if an error occurred or invalid parameters
     ///
     /// # Note
     /// The pattern must not be empty and must be smaller than the buffer size.
-    pub fn read_until(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Xum1541Error> {
+    pub fn read_until(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Error> {
         let size = buf.len();
         trace!(
             "Bus::read_until buf.len() {size} pattern.len() {}",
@@ -232,12 +232,12 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(usize)` - number of bytes read (including the matching byte if found)
-    /// * `Err(Xum1541Error)` - if an error occurred or invalid parameters
+    /// * `Err(Error)` - if an error occurred or invalid parameters
     ///
     /// # Note
     /// The pattern must not be empty and the buffer must be the size of the
     /// maximum desired read length.
-    pub fn read_until_any(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Xum1541Error> {
+    pub fn read_until_any(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Error> {
         let size = buf.len();
         trace!(
             "Bus::read_until_any buf.len() {size} pattern.len() {}",
@@ -271,11 +271,11 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(usize)` - number of bytes written if successful
-    /// * `Err(Xum1541Error)` - if an error occurred or buffer is empty
+    /// * `Err(Error)` - if an error occurred or buffer is empty
     ///
     /// # Note
     /// Will warn if bus is in talking mode when this is called.
-    pub fn write(&self, buf: &[u8]) -> Result<usize, Xum1541Error> {
+    pub fn write(&self, buf: &[u8]) -> Result<usize, Error> {
         trace!("Entered Bus::write buf.len(): {}", buf.len());
         let size = buf.len();
         if size == 0 {
@@ -300,7 +300,7 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(Option<u16>)` - 2 byte status from the device, or None for an asyncronous ioctl, as this function does not wait after async ioctl
-    /// * `Err(Xum1541Error)` - On failure
+    /// * `Err(Error)` - On failure
     ///
     /// Note - this function may be deprecated in a future version, and replaced
     /// with specific functions for required ioctls
@@ -309,7 +309,7 @@ impl Bus {
         ioctl: Ioctl,
         address: u8,
         secondary_address: u8,
-    ) -> Result<Option<u16>, Xum1541Error> {
+    ) -> Result<Option<u16>, Error> {
         self.device.ioctl(ioctl, address, secondary_address)
     }
 
@@ -317,13 +317,13 @@ impl Bus {
     ///
     /// # Returns
     /// - `u16` - On success, a 2 byte status from the device
-    /// - `Xum1541Error` - On failure, including if there is no status
+    /// - `Error` - On failure, including if there is no status
     /// response (because GetEoi is a syncronous command, hence we expect a status)
-    pub fn get_eoi(&self) -> Result<u16, Xum1541Error> {
+    pub fn get_eoi(&self) -> Result<u16, Error> {
         trace!("Bus::get_eoi");
         self.device
             .ioctl(Ioctl::GetEoi, 0, 0)?
-            .ok_or(Xum1541Error::Communication {
+            .ok_or(Error::Communication {
                 kind: CommunicationKind::IoctlFailed,
             })
     }
@@ -332,13 +332,13 @@ impl Bus {
     ///
     /// # Returns
     /// - `u16` - On success, a 2 byte status from the device
-    /// - `Xum1541Error` - On failure, including if there is no status
+    /// - `Error` - On failure, including if there is no status
     /// response (because GetEoi is a syncronous command, hence we expect a status)
-    pub fn clear_eoi(&self) -> Result<u16, Xum1541Error> {
+    pub fn clear_eoi(&self) -> Result<u16, Error> {
         trace!("Bus::clear_eoi");
         self.device
             .ioctl(Ioctl::ClearEoi, 0, 0)?
-            .ok_or(Xum1541Error::Communication {
+            .ok_or(Error::Communication {
                 kind: CommunicationKind::IoctlFailed,
             })
     }
@@ -355,8 +355,8 @@ impl Bus {
     ///
     /// # Returns
     /// `Ok(u16)` - the 2 byte status value from the device
-    /// `Err(Xum1541Error)` - the error on failure
-    pub fn wait_for_status(&self) -> Result<u16, Xum1541Error> {
+    /// `Err(Error)` - the error on failure
+    pub fn wait_for_status(&self) -> Result<u16, Error> {
         self.device.wait_for_status()
     }
 
@@ -408,8 +408,8 @@ impl Bus {
     ///
     /// # Returns
     /// * `Ok(Option<u8>)` - the byte read if successful, None if EOF
-    /// * `Err(Xum1541Error)` - if an error occurred
-    fn read_one_byte(&self) -> Result<Option<u8>, Xum1541Error> {
+    /// * `Err(Error)` - if an error occurred
+    fn read_one_byte(&self) -> Result<Option<u8>, Error> {
         trace!("Bus::read_one_byte");
         let mut temp = vec![0u8; 1];
         match self.device.read_data(PROTO_CBM, &mut temp) {
@@ -432,12 +432,12 @@ impl Bus {
     ///
     /// # Returns:
     /// * `Ok(())` - if validation successful
-    /// * `Err(Xum1541Error)` - if validation failed
+    /// * `Err(Error)` - if validation failed
     fn validate_read_params(
         buf: &[u8],
         pattern: Option<&[u8]>,
         check_pattern_size: bool,
-    ) -> Result<(), Xum1541Error> {
+    ) -> Result<(), Error> {
         let size = buf.len();
         let pattern_len = pattern.map(|p| p.len());
         trace!("Bus::validate_read_params buf.len(): {size} pattern_len: {pattern_len:?} check_pattern_size: {check_pattern_size}");
@@ -472,7 +472,7 @@ impl Bus {
     ///
     /// # Returns:
     /// * `Ok(())` - if command executed successfully
-    /// * `Err(Xum1541Error)` - if an error occurred during command execution
+    /// * `Err(Error)` - if an error occurred during command execution
     ///
     /// # Note:
     /// * Validates the command against current bus state and warns if inappropriate
@@ -480,7 +480,7 @@ impl Bus {
     ///   * Open/Listen -> Listening mode
     ///   * Talk -> Talking mode
     ///   * Close/Unlisten/Untalk -> Idle mode
-    fn execute_command(&mut self, command: BusCommand) -> Result<(), Xum1541Error> {
+    fn execute_command(&mut self, command: BusCommand) -> Result<(), Error> {
         trace!(
             "Entered Bus::execute_command command {command} bus in mode {}",
             self.mode
@@ -546,19 +546,28 @@ impl Bus {
 
         // Execute the command
         debug!("Bus:execute_command {command}");
-        let result = self.device
+        let result = self
+            .device
             .write_data(command.protocol(), &command.command_bytes())
             .map(|_| ());
-        
-        if let Err(Xum1541Error::Communication { kind: CommunicationKind::StatusValue { value: _ } }) = result {  // Note: 'result' needs to be the expression you're matching on
+
+        if let Err(Error::Communication {
+            kind: CommunicationKind::StatusValue { value: _ },
+        }) = result
+        {
+            // Note: 'result' needs to be the expression you're matching on
             match command {
                 BusCommand::Talk(_) | BusCommand::Listen(_) | BusCommand::Open(_) => {
                     debug!("Bus command {command} failed, setting bus back to Idle");
                     self.mode = BusMode::Idle;
-                },
-                _ => debug!("Bus command {command} failed, leaving bus in state {}", self.mode),
+                }
+                _ => debug!(
+                    "Bus command {command} failed, leaving bus in state {}",
+                    self.mode
+                ),
             }
-        }        result
+        }
+        result
     }
 }
 
@@ -682,7 +691,7 @@ impl BusBuilder {
     ///
     /// # Returns
     /// * `Ok(Bus)` - the constructed Bus instance if successful
-    /// * `Err(Xum1541Error)` - if an error occurred during construction
+    /// * `Err(Error)` - if an error occurred during construction
     ///
     /// # Example
     /// See [`BusBuilder`]
@@ -693,7 +702,7 @@ impl BusBuilder {
     ///   * timeout: [`DEFAULT_BUS_TIMEOUT`]
     ///   * context: new Context with LogLevel::Info
     /// * Will create a new [`Device`] unless one was explicitly provided
-    pub fn build(&mut self) -> Result<Bus, Xum1541Error> {
+    pub fn build(&mut self) -> Result<Bus, Error> {
         // Create the Device
         let device = if self.device.is_none() {
             if self.context.is_some() {

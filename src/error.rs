@@ -5,7 +5,7 @@ use thiserror::Error;
 
 /// Error type for the xum1541 crate
 #[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
-pub enum Xum1541Error {
+pub enum Error {
     /// Errors accessing the USB device
     /// Note that permission problems are explicitly handled in the DeviceAccessKind
     #[error("USB error while attempting to commuicate with the XUM1541: {0}")]
@@ -92,21 +92,21 @@ pub enum SerializableUsbError {
     UsbError { message: String },
 }
 
-impl Xum1541Error {
+impl Error {
     pub fn to_errno(&self) -> i32 {
         match self {
-            Xum1541Error::Usb { .. } => EIO,
-            Xum1541Error::Init { .. } => EIO,
-            Xum1541Error::Communication { .. } => EIO,
-            Xum1541Error::Timeout { .. } => ETIMEDOUT,
-            Xum1541Error::DeviceAccess { kind } => match kind {
+            Error::Usb { .. } => EIO,
+            Error::Init { .. } => EIO,
+            Error::Communication { .. } => EIO,
+            Error::Timeout { .. } => ETIMEDOUT,
+            Error::DeviceAccess { kind } => match kind {
                 DeviceAccessKind::NoDevice { .. } => ENODEV,
                 DeviceAccessKind::NotFound { .. } => ENOENT,
                 DeviceAccessKind::SerialMismatch { .. } => ENOENT,
                 DeviceAccessKind::FirmwareVersion { .. } => ENODEV,
                 DeviceAccessKind::Permission { .. } => EACCES,
             },
-            Xum1541Error::Args { .. } => EINVAL,
+            Error::Args { .. } => EINVAL,
         }
     }
 }
@@ -122,17 +122,17 @@ pub enum InternalError {
     DeviceInfo { message: String },
 
     #[error("{error}")]
-    PublicError { error: Xum1541Error },
+    PublicError { error: Error },
 }
 
-/// Map Xum1541Error to an InternalError
-impl From<Xum1541Error> for InternalError {
-    fn from(error: Xum1541Error) -> Self {
+/// Map Error to an InternalError
+impl From<Error> for InternalError {
+    fn from(error: Error) -> Self {
         InternalError::PublicError { error }
     }
 }
 
-/// Map rusb:Error to an Xum1541Error, wrapped in an InternalError::PublicError type
+/// Map rusb:Error to an Error, wrapped in an InternalError::PublicError type
 impl From<rusb::Error> for InternalError {
     fn from(error: rusb::Error) -> Self {
         InternalError::PublicError {
@@ -141,8 +141,8 @@ impl From<rusb::Error> for InternalError {
     }
 }
 
-// Map rusb::Error to Xum1541Error
-impl From<rusb::Error> for Xum1541Error {
+// Map rusb::Error to Error
+impl From<rusb::Error> for Error {
     fn from(err: rusb::Error) -> Self {
         Self::Usb(SerializableUsbError::UsbError {
             message: err.to_string(),
@@ -150,8 +150,8 @@ impl From<rusb::Error> for Xum1541Error {
     }
 }
 
-// Map CommunicationKind to Xum1541Error
-impl From<CommunicationKind> for Xum1541Error {
+// Map CommunicationKind to Error
+impl From<CommunicationKind> for Error {
     fn from(kind: CommunicationKind) -> Self {
         Self::Communication { kind }
     }

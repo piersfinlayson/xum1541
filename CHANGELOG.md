@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - Downgraded error! to warn! logging - to avoid double error logging problems which the library user will also like log (and likely as error).  Reserve error! for unrecoverable error in xum1541.
 - Changed Communication error to take CommunicationKind - to break out different sorts of errors, in particular the StatusValue, which can be used
 on [`Bus::talk`] and [`Bus::Listen`] to infer the lack of a particular device.
+- Change Xum1541Error to Error
 
 ## [0.1.1] - 2025-01-24
 ### Added

@@ -4,9 +4,9 @@
 ///
 /// basic.rs may be a better example to start with, as it is provides better
 /// error handling.
-use xum1541::{BusBuilder, DeviceChannel, Xum1541Error};
+use xum1541::{BusBuilder, DeviceChannel, Error};
 
-fn main() -> Result<(), Xum1541Error> {
+fn main() -> Result<(), Error> {
     // Connect to the XUM1541 device
     let mut bus = BusBuilder::new().build()?;
 

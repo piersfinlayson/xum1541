@@ -3,7 +3,7 @@
 /// Check whether drives between 8-11 are present on the bus.  The way
 /// this is done is by instructing each dive in turn to listen or talk on
 /// the bus.
-/// 
+///
 /// If Device::write_data(), which is called by Bus::execute_command()
 /// (which in turns is being called by Bus::talk() and Bus::listen())
 /// receives a 0x0000 status response from the xum1541, this indicates
@@ -12,7 +12,7 @@
 /// Note however that there are other reasons why the xum1541 may return
 /// a status value of 0x0000.  See OpenCbm/xum1541/iec.c, function
 /// iec_raw_write() for these cases.
-use xum1541::{BusBuilder, DeviceChannel, Xum1541Error, CommunicationKind};
+use xum1541::{BusBuilder, CommunicationKind, DeviceChannel, Error};
 mod common;
 use common::AppError;
 use env_logger;
@@ -61,12 +61,17 @@ fn main() -> Result<(), AppError> {
         let elapsed = start.elapsed();
 
         match result {
-            Err(Xum1541Error::Communication { kind: CommunicationKind::StatusValue { value: _ }}) => {
-                println!("Drive {drive} not detected via {mode} - check took {}ms", elapsed.as_millis());
-            },
+            Err(Error::Communication {
+                kind: CommunicationKind::StatusValue { value: _ },
+            }) => {
+                println!(
+                    "Drive {drive} not detected via {mode} - check took {}ms",
+                    elapsed.as_millis()
+                );
+            }
             Err(e) => {
                 println!("Hit unexpected error trying to detect drive {drive} via {mode}: {e} - check took {}ms", elapsed.as_millis());
-            },
+            }
             Ok(_) => {
                 let result = match mode {
                     Mode::Listen => bus.unlisten(),
@@ -75,11 +80,14 @@ fn main() -> Result<(), AppError> {
                 match result {
                     Err(e) => {
                         println!("Hit unexpected error trying to detect drive {drive} via {mode}: {e} - check took {}ms", elapsed.as_millis());
-                    },
+                    }
                     Ok(_) => (),
                 }
-                println!("Drive {drive} detected via {mode} - check took {}ms", elapsed.as_millis());
-            },
+                println!(
+                    "Drive {drive} detected via {mode} - check took {}ms",
+                    elapsed.as_millis()
+                );
+            }
         }
 
         // Move on the next drive, and use the other mechanism to check

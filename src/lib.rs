@@ -63,7 +63,7 @@
 //!
 //! ## Error Handling
 //!
-//! The library uses a custom `Xum1541Error` type that covers:
+//! The library uses a custom `Error` type that covers:
 //!
 //! - Device access errors (not found, firmware version mismatch, serial number mismatch)
 //! - Communication failures (USB errors, timeouts)
@@ -139,9 +139,9 @@
 //! * [`examples/basic.rs`](examples/basic.rs) - A more complex example which enables logging (run with `RUST_LOG=info`` for example) queries the device's capabilities and drive status.
 //!
 //! ```rust,no_run
-//! use xum1541::{BusBuilder, DeviceChannel, Xum1541Error};
+//! use xum1541::{BusBuilder, DeviceChannel, Error};
 //!
-//! fn main() -> Result<(), Xum1541Error> {
+//! fn main() -> Result<(), Error> {
 //!     // Connect to the XUM1541 device
 //!     let mut bus = BusBuilder::new().build()?;
 //!
@@ -238,4 +238,4 @@ pub use crate::bus::{Bus, BusBuilder, DEFAULT_BUS_TIMEOUT};
 pub use crate::buscmd::DeviceChannel;
 pub use crate::constants::Ioctl;
 pub use crate::device::*;
-pub use crate::error::{DeviceAccessKind, Xum1541Error, CommunicationKind};
+pub use crate::error::{CommunicationKind, DeviceAccessKind, Error};

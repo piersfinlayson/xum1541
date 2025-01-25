@@ -31,9 +31,9 @@ cargo add xum1541
 ## Usage
 
 ```rust
-use xum1541::{BusBuilder, Xum1541Error};
+use xum1541::{BusBuilder, Error};
 
-fn main() -> Result<(), Xum1541Error> {
+fn main() -> Result<(), Error> {
     // Connect to the XUM1541 device 
     let mut bus = BusBuilder::new().build()?;
 

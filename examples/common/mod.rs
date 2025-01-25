@@ -1,18 +1,18 @@
 use thiserror::Error;
-use xum1541::Xum1541Error;
+use xum1541::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("xum1541 error: {error}")]
-    Xum1541Error { error: Xum1541Error },
+    Error { error: Error },
 
     #[error("App error: {message}")]
     App { message: String },
 }
 
-impl From<Xum1541Error> for AppError {
-    fn from(error: Xum1541Error) -> Self {
-        AppError::Xum1541Error { error }
+impl From<Error> for AppError {
+    fn from(error: Error) -> Self {
+        AppError::Error { error }
     }
 }
 

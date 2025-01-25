@@ -4,9 +4,9 @@
 //! re-implementing [`crate::Bus`] or adding to it.
 #[allow(unused_imports)]
 use crate::constants::*;
-use crate::error::{InternalError, CommunicationKind};
+use crate::error::{CommunicationKind, InternalError};
 use crate::DeviceAccessKind::*;
-use crate::Xum1541Error::{self, *};
+use crate::Error::{self, *};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -147,7 +147,7 @@ impl Device {
     ///
     /// # Returns
     /// * `Ok(Device)` - Successfully created device instance
-    /// * `Err(Xum1541Error)` - If device creation fails (no device found or USB error)
+    /// * `Err(Error)` - If device creation fails (no device found or USB error)
     ///
     /// Note that the Device returned has not been initialized.  It must be
     /// initialized before use with [`Device::init`].
@@ -163,7 +163,7 @@ impl Device {
     /// ```
     ///
     /// Note that the created [`rusb::Context`] will not have rusb logging enabled.
-    pub fn new(serial_num: Option<u8>) -> Result<Self, Xum1541Error> {
+    pub fn new(serial_num: Option<u8>) -> Result<Self, Error> {
         trace!("Device::new serial_num {serial_num:?}");
         let context = Context::new()?;
         Self::with_context(context, serial_num)
@@ -178,7 +178,7 @@ impl Device {
     ///
     /// # Returns
     /// * `Ok(Device)` - Successfully created device instance
-    /// * `Err(Xum1541Error)` - If device creation fails (no device found or USB error)
+    /// * `Err(Error)` - If device creation fails (no device found or USB error)
     ///
     /// Note that the Device returned has not been initialized.  It must be
     /// initialized before use with [`Device::init`].
@@ -196,7 +196,7 @@ impl Device {
     ///
     /// // Now do device.init().unwrap(); etc
     /// ```
-    pub fn with_context(context: Context, serial_num: Option<u8>) -> Result<Self, Xum1541Error> {
+    pub fn with_context(context: Context, serial_num: Option<u8>) -> Result<Self, Error> {
         trace!("Device::with_context context {context:?} serial_num {serial_num:?}");
         let (_device, handle) = Self::find_device(&context, serial_num)?;
 
@@ -217,8 +217,8 @@ impl Device {
     ///
     /// # Returns
     /// * `Ok(())` - Successfully initialized device
-    /// * `Err(Xum1541Error)` - If device initialization fails
-    pub fn init(&mut self) -> Result<(), Xum1541Error> {
+    /// * `Err(Error)` - If device initialization fails
+    pub fn init(&mut self) -> Result<(), Error> {
         trace!("Device::init");
         self.info = Some(self.initialize_device()?);
         Ok(())
@@ -248,8 +248,8 @@ impl Device {
     ///
     /// # Returns
     /// * `Ok(())` - If successful
-    /// * `Err(Xum1541Error)` - On error
-    pub fn hard_reset_and_re_init(&mut self) -> Result<(), Xum1541Error> {
+    /// * `Err(Error)` - On error
+    pub fn hard_reset_and_re_init(&mut self) -> Result<(), Error> {
         trace!("Device::hard_reset_and_re_init");
         // Drop the info - this will be reinitialized shortly
         // Resetting the device doesn't require this
@@ -269,16 +269,11 @@ impl Device {
     ///
     /// # Returns
     /// * `Ok(usize)` - On success, with the number of bytes read
-    /// * `Err(Xum1541Error)` - On failure
+    /// * `Err(Error)` - On failure
     ///
     /// Note that the calling function must provide a large enough buffer for
     /// the response, or some bytes may not be read.
-    pub fn read_control(
-        &self,
-        request: u8,
-        value: u16,
-        buffer: &mut [u8],
-    ) -> Result<usize, Xum1541Error> {
+    pub fn read_control(&self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize, Error> {
         trace!(
             "Device::read_control request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
@@ -314,13 +309,8 @@ impl Device {
     ///
     /// # Returns
     /// * `Ok()` - On success
-    /// * `Err(Xum1541Error)` - On failure
-    pub fn write_control(
-        &self,
-        request: u8,
-        value: u16,
-        buffer: &[u8],
-    ) -> Result<(), Xum1541Error> {
+    /// * `Err(Error)` - On failure
+    pub fn write_control(&self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Error> {
         trace!(
             "Device::write_control request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
@@ -348,7 +338,8 @@ impl Device {
             if status == 0 {
                 return Err(Communication {
                     kind: CommunicationKind::StatusValue { value: status },
-                }.into());
+                }
+                .into());
             }
         }
 
@@ -366,13 +357,13 @@ impl Device {
     ///
     /// # Returns
     /// * `Ok(Option<u16>)` - 2 byte status from the device, or None for an asyncronous ioctl, as this function does not wait after async ioctl
-    /// * `Err(Xum1541Error)` - On failure
+    /// * `Err(Error)` - On failure
     pub fn ioctl(
         &self,
         ioctl: Ioctl,
         address: u8,
         secondary_address: u8,
-    ) -> Result<Option<u16>, Xum1541Error> {
+    ) -> Result<Option<u16>, Error> {
         trace!("Device::ioctl {ioctl} address {address} secondary_address {secondary_address}");
 
         // Build 4-byte command buffer
@@ -414,8 +405,8 @@ impl Device {
     ///
     /// # Returns
     /// * `Ok(usize)` - On success, number of bytes written
-    /// * `Err(Xum1541Error>` - On failure
-    pub fn write_data(&self, mode: u8, data: &[u8]) -> Result<usize, Xum1541Error> {
+    /// * `Err(Error>` - On failure
+    pub fn write_data(&self, mode: u8, data: &[u8]) -> Result<usize, Error> {
         let size = data.len();
         trace!("Device::write_data mode b{mode:08b} data.len() {size}");
 
@@ -465,7 +456,8 @@ impl Device {
             } else {
                 Err(Communication {
                     kind: CommunicationKind::StatusValue { value: status },
-                }.into())
+                }
+                .into())
             }
         } else {
             Ok(bytes_written)
@@ -484,8 +476,8 @@ impl Device {
     ///
     /// # Returns
     /// * `Ok(usize)` - On success, number of bytes written
-    /// * `Err(Xum1541Error>` - On failure
-    pub fn read_data(&self, mode: u8, buffer: &mut [u8]) -> Result<usize, Xum1541Error> {
+    /// * `Err(Error>` - On failure
+    pub fn read_data(&self, mode: u8, buffer: &mut [u8]) -> Result<usize, Error> {
         let size = buffer.len();
         trace!("Device::read_data mode b{mode:08b} buffer.len() {size}");
 
@@ -541,8 +533,8 @@ impl Device {
     ///
     /// # Returns
     /// `Ok(u16)` - the 2 byte status value from the device
-    /// `Err(Xum1541Error)` - the error on failure
-    pub fn wait_for_status(&self) -> Result<u16, Xum1541Error> {
+    /// `Err(Error)` - the error on failure
+    pub fn wait_for_status(&self) -> Result<u16, Error> {
         trace!("Device::wait_for_status");
 
         let mut status_buf = vec![0u8; STATUS_BUF_SIZE];
@@ -588,9 +580,9 @@ impl Device {
                         num => {
                             let message = format!("Unexpected status from device {num}");
                             warn!("{message}");
-                            break Err(Communication { 
-                                kind: CommunicationKind::StatusResponse { value: num}
-                             });
+                            break Err(Communication {
+                                kind: CommunicationKind::StatusResponse { value: num },
+                            });
                         }
                     }
                 }
@@ -626,7 +618,7 @@ impl Device {
     fn find_device(
         context: &Context,
         serial_num: Option<u8>,
-    ) -> Result<(RusbDevice<Context>, RusbDeviceHandle<Context>), Xum1541Error> {
+    ) -> Result<(RusbDevice<Context>, RusbDeviceHandle<Context>), Error> {
         trace!("Device::find_device context {context:?} serial_num {serial_num:?}");
 
         let mut found_serial_nums = vec![];
@@ -697,7 +689,7 @@ impl Device {
     // The device must be (re) initialized after this function.  It is
     // deliberately made a non-public function to avoid external parties
     // accidently resetting and then not re-initializing
-    fn hard_reset_pre_init(&self) -> Result<(), Xum1541Error> {
+    fn hard_reset_pre_init(&self) -> Result<(), Error> {
         trace!("Device::hard_reset_pre_init");
         info!("Hard reset the device");
         self.handle.reset()?;
@@ -707,7 +699,7 @@ impl Device {
     }
 
     /// Initialize device and get info
-    fn initialize_device(&mut self) -> Result<DeviceInfo, Xum1541Error> {
+    fn initialize_device(&mut self) -> Result<DeviceInfo, Error> {
         trace!("Device::initialize_device");
 
         // Hard reset the device
@@ -752,7 +744,7 @@ impl Device {
         Ok(info)
     }
 
-    fn clear_halt(&self) -> Result<(), Xum1541Error> {
+    fn clear_halt(&self) -> Result<(), Error> {
         trace!("Device::clear_halt");
 
         match self.handle.clear_halt(BULK_IN_ENDPOINT) {
@@ -785,7 +777,7 @@ impl Device {
     }
 
     /// Verify device identity and set up initial configuration
-    fn verify_and_setup_device(&mut self) -> Result<DeviceInfo, Xum1541Error> {
+    fn verify_and_setup_device(&mut self) -> Result<DeviceInfo, Error> {
         trace!("Device::verify_and_setup_device");
         let device = self.handle.device();
         let device_desc = device.device_descriptor()?;
@@ -824,7 +816,7 @@ impl Device {
     }
 
     /// Read product string with error handling
-    fn read_product_string(&self, device_desc: &DeviceDescriptor) -> Result<String, Xum1541Error> {
+    fn read_product_string(&self, device_desc: &DeviceDescriptor) -> Result<String, Error> {
         trace!("Device::read_product_string device_desc {device_desc:?}");
         self.handle
             .read_product_string_ascii(device_desc)
@@ -834,7 +826,7 @@ impl Device {
     }
 
     /// Set up device configuration and claim interface
-    fn setup_device_configuration(&mut self) -> Result<(), Xum1541Error> {
+    fn setup_device_configuration(&mut self) -> Result<(), Error> {
         trace!("Device::setup_device_configuration");
         let config = self.handle.active_configuration()?;
         debug!("Current configuration is {}", config);
@@ -849,7 +841,7 @@ impl Device {
     }
 
     /// Read basic device information
-    fn read_basic_info(&mut self, initial_info: &DeviceInfo) -> Result<DeviceInfo, Xum1541Error> {
+    fn read_basic_info(&mut self, initial_info: &DeviceInfo) -> Result<DeviceInfo, Error> {
         trace!("Device::read_basic_info initial_info {initial_info:?}");
         let mut info_buf = [0u8; DEV_INFO_SIZE];
         let len = self.read_control(CTRL_INIT as u8, 0, &mut info_buf)?;
