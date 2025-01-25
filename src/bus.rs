@@ -242,15 +242,6 @@ impl Bus {
             "Bus::read_until_any buf.len() {size} pattern.len() {}",
             pattern.len()
         );
-        if buf.len() < size {
-            return Err(Args {
-                message: format!(
-                    "Buffer length {} shorter than requested read size{}",
-                    buf.len(),
-                    size
-                ),
-            });
-        }
 
         Self::validate_read_params(buf, Some(pattern), false)?;
 
