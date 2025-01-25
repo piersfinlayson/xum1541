@@ -1,7 +1,7 @@
 //! Error objects for the xum1541 crate
 use libc::{EACCES, EINVAL, EIO, ENODEV, ENOENT, ETIMEDOUT};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use serde::{Serialize, Deserialize};
 
 /// Error type for the xum1541 crate
 #[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
@@ -62,7 +62,7 @@ pub enum DeviceAccessKind {
 #[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
 pub enum SerializableUsbError {
     #[error("{message}")]
-    UsbError { message: String }
+    UsbError { message: String },
 }
 
 impl Xum1541Error {
@@ -117,8 +117,8 @@ impl From<rusb::Error> for InternalError {
 // Map rusb::Error to Xum1541Error
 impl From<rusb::Error> for Xum1541Error {
     fn from(err: rusb::Error) -> Self {
-        Self::Usb(SerializableUsbError::UsbError { 
-            message: err.to_string() 
+        Self::Usb(SerializableUsbError::UsbError {
+            message: err.to_string(),
         })
     }
 }

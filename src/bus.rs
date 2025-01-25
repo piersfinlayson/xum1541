@@ -451,23 +451,22 @@ impl Bus {
         trace!("Bus::validate_read_params buf.len(): {size} pattern_len: {pattern_len:?} check_pattern_size: {check_pattern_size}");
 
         if size == 0 {
-            warn!("Attempt to read 0 bytes");
-            return Err(Args {
-                message: format!("Attempted to read 0 bytes"),
-            });
+            let message = "Attempt to read 0 bytes".to_string();
+            warn!("{message}");
+            return Err(Args { message });
         }
 
         if let Some(pattern_len) = pattern_len {
             if pattern_len == 0 {
-                warn!("Attempt to read match against empty pattern");
-                return Err(Args {
-                    message: format!("Attempt to read match against empty pattern"),
-                });
+                let message = "Attempt to read match against empty pattern".to_string();
+                warn!("{message}");
+                return Err(Args { message });
             }
 
             if check_pattern_size && pattern_len > size {
-                warn!("Attempt to read match against pattern of larger {pattern_len} than requested read size {size}");
-                return Err(Args { message: format!("Attempt to read match against pattern of larger {pattern_len} than requested read size {size}") });
+                let message = format!("Attempt to read match against pattern of larger {pattern_len} than requested read size {size}");
+                warn!("{message}");
+                return Err(Args { message });
             }
         }
 

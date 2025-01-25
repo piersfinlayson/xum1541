@@ -416,10 +416,11 @@ impl Device {
 
         // Validate inputs
         if size > MAX_XFER_SIZE {
-            warn!(
+            let message = format!(
                 "Attempted to write {size} more than max supported number of bytes {MAX_XFER_SIZE}"
             );
-            return Err(Args { message: format!("Attempted to write {size} more than max supported number of bytes {MAX_XFER_SIZE}") });
+            warn!("{message}");
+            return Err(Args { message });
         }
 
         // Send the write command with 4-byte command buffer
@@ -479,17 +480,17 @@ impl Device {
 
         // Check inputs
         if size > MAX_XFER_SIZE {
-            warn!(
+            let message = format!(
                 "Attempted to read {size} more than max supported number of bytes {MAX_XFER_SIZE}"
             );
-            return Err(Args { message: format!("Attempted to read {size} more than max supported number of bytes {MAX_XFER_SIZE}") });
+            warn!("{message}");
+            return Err(Args { message });
         }
         let buf_len = buffer.len();
         if size > buf_len {
-            warn!("Attempted to read {size} more than buffer length {buf_len}");
-            return Err(Args {
-                message: format!("Attempted to read {size} more than buffer length {buf_len}"),
-            });
+            let message = format!("Attempted to read {size} more than buffer length {buf_len}");
+            warn!("{message}");
+            return Err(Args { message });
         }
 
         // Send read command with 4-byte command buffer
@@ -574,10 +575,9 @@ impl Device {
                             });
                         }
                         num => {
-                            warn!("Unexpected status from device {}", num);
-                            break Err(Communication {
-                                message: format!("Unexpected error from device {}", num),
-                            });
+                            let message = format!("Unexpected status from device {num}");
+                            warn!("{message}");
+                            break Err(Communication { message });
                         }
                     }
                 }
@@ -660,7 +660,7 @@ impl Device {
         }
 
         let err = if found_serial_nums.len() > 0 {
-            error!("No matching XUM1541 device found {serial_num}, but found non-matching serial(s) {found_serial_nums:?}");
+            info!("No matching XUM1541 device found {serial_num}, but found non-matching serial(s) {found_serial_nums:?}");
             DeviceAccess {
                 kind: SerialMismatch {
                     vid: XUM1541_VID,
@@ -670,7 +670,7 @@ impl Device {
                 },
             }
         } else {
-            error!("No suitable XUM1541 device found");
+            info!("No suitable XUM1541 device found");
             DeviceAccess {
                 kind: NotFound {
                     vid: XUM1541_VID,
@@ -722,12 +722,12 @@ impl Device {
                     InternalError::PublicError { error } => {
                         // This suggests we actually hit a USB or similar error
                         // so we treat this as failure
-                        error!("Failed to read debug info from device: {}", error);
+                        warn!("Failed to read debug info from device: {}", error);
                         return Err(error);
                     }
                     e => {
                         // Hit some sort of processing error - we'll treat this as a non-failure mode
-                        warn!("Failed to read debug info from device: {}", e);
+                        info!("Failed to read debug info from device: {}", e);
                         None
                     }
                 },
@@ -745,7 +745,7 @@ impl Device {
         match self.handle.clear_halt(BULK_IN_ENDPOINT) {
             Ok(_) => (),
             Err(e) => {
-                error!("USB clear halt request failed for in endpoint: {}", e);
+                warn!("USB clear halt request failed for in endpoint: {}", e);
                 return Err(e.into());
             }
         }
@@ -753,7 +753,7 @@ impl Device {
         match self.handle.clear_halt(BULK_OUT_ENDPOINT) {
             Ok(_) => Ok(()),
             Err(e) => {
-                error!("USB clear halt request failed for out endpoint: {}", e);
+                warn!("USB clear halt request failed for out endpoint: {}", e);
                 Err(e.into())
             }
         }
