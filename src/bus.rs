@@ -6,6 +6,7 @@ use crate::constants::*;
 #[allow(unused_imports)]
 use crate::Xum1541Error::{self, *};
 use crate::{Device, DeviceInfo};
+use crate::error::CommunicationKind;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -323,7 +324,7 @@ impl Bus {
         self.device
             .ioctl(Ioctl::GetEoi, 0, 0)?
             .ok_or(Xum1541Error::Communication {
-                message: "Get EOI failed".to_string(),
+                kind: CommunicationKind::IoctlFailed,
             })
     }
 
@@ -338,7 +339,7 @@ impl Bus {
         self.device
             .ioctl(Ioctl::ClearEoi, 0, 0)?
             .ok_or(Xum1541Error::Communication {
-                message: "Clear EOI failed".to_string(),
+                kind: CommunicationKind::IoctlFailed,
             })
     }
 

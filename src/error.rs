@@ -16,8 +16,8 @@ pub enum Xum1541Error {
     Init { message: String },
 
     /// Failure in communicating with the XUM1541 device - may be transient
-    #[error("XUM1541 device communication error: {message}")]
-    Communication { message: String },
+    #[error("XUM1541 device communication error: {kind}")]
+    Communication { kind: CommunicationKind },
 
     /// A USB operation timed out
     #[error("XUM1541 operation timed out after {dur:?}")]
@@ -57,6 +57,33 @@ pub enum DeviceAccessKind {
 
     #[error("Hit USB permissions error while attempting to access XUM1541 device.  Are you sure you have suitable permissions?  You may need to reconfigure udev rules in /etc/udev/rules.d/.")]
     Permission,
+}
+
+#[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
+pub enum CommunicationKind {
+    /// Hit a failure issuing an ioctl to the device
+    #[error("Failed to issue ioctl to device")]
+    IoctlFailed,
+
+    /// Device failed to provide a status response of the proper format
+    #[error("Device returned an invalid status response format")]
+    StatusFormat,
+
+    /// Device returned an IO error status response
+    #[error("Device returned an IO error status response")]
+    StatusIo,
+
+    /// Devicereturned an overall status response with an invalid value
+    #[error("Device returned an invalid status response value 0x{value:02x}")]
+    StatusResponse { value: u8 },
+
+    /// Device returned an error status value
+    #[error("Device returned an error status value 0x{value:04x}")]
+    StatusValue { value: u16 },
+
+    /// Timed out waiting for a status response from the device
+    #[error("Timed out waiting for a status response from the device")]
+    StatusTimeout { dur: std::time::Duration },
 }
 
 #[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
@@ -120,5 +147,12 @@ impl From<rusb::Error> for Xum1541Error {
         Self::Usb(SerializableUsbError::UsbError {
             message: err.to_string(),
         })
+    }
+}
+
+// Map CommunicationKind to Xum1541Error
+impl From<CommunicationKind> for Xum1541Error {
+    fn from(kind: CommunicationKind) -> Self {
+        Self::Communication { kind }
     }
 }

@@ -4,7 +4,7 @@
 //! re-implementing [`crate::Bus`] or adding to it.
 #[allow(unused_imports)]
 use crate::constants::*;
-use crate::error::InternalError;
+use crate::error::{InternalError, CommunicationKind};
 use crate::DeviceAccessKind::*;
 use crate::Xum1541Error::{self, *};
 
@@ -313,7 +313,7 @@ impl Device {
     /// * `buffer` - A buffer with any additional data to send
     ///
     /// # Returns
-    /// * `Ok(())` - On success
+    /// * `Ok()` - On success
     /// * `Err(Xum1541Error)` - On failure
     pub fn write_control(
         &self,
@@ -344,7 +344,12 @@ impl Device {
         // down or called reset
         if (request != CTRL_SHUTDOWN) && (request != CTRL_RESET) {
             // Wait for status response
-            self.wait_for_status()?;
+            let status = self.wait_for_status()?;
+            if status == 0 {
+                return Err(Communication {
+                    kind: CommunicationKind::StatusValue { value: status },
+                }.into());
+            }
         }
 
         trace!("Exited control_write - success");
@@ -454,8 +459,14 @@ impl Device {
         // For CBM protocol, wait for status
         if (mode & PROTO_MASK) == PROTO_CBM {
             let status = self.wait_for_status()?;
-            trace!("Retrieved status {:04x}", status);
-            Ok(status as usize)
+            trace!("Retrieved status 0x{:04x}", status);
+            if status != 0 {
+                Ok(status as usize)
+            } else {
+                Err(Communication {
+                    kind: CommunicationKind::StatusValue { value: status },
+                }.into())
+            }
         } else {
             Ok(bytes_written)
         }
@@ -571,13 +582,15 @@ impl Device {
                         IO_ERROR => {
                             trace!("Device IO error");
                             break Err(Communication {
-                                message: "Device returned IO error".into(),
+                                kind: CommunicationKind::StatusIo,
                             });
                         }
                         num => {
                             let message = format!("Unexpected status from device {num}");
                             warn!("{message}");
-                            break Err(Communication { message });
+                            break Err(Communication { 
+                                kind: CommunicationKind::StatusResponse { value: num}
+                             });
                         }
                     }
                 }
@@ -588,7 +601,7 @@ impl Device {
                         STATUS_BUF_SIZE
                     );
                     break Err(Communication {
-                        message: format!("Device returned wrong number of status bytes {}", len),
+                        kind: CommunicationKind::StatusFormat,
                     });
                 }
                 Err(e) => match e {
