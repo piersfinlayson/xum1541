@@ -546,9 +546,19 @@ impl Bus {
 
         // Execute the command
         debug!("Bus:execute_command {command}");
-        self.device
+        let result = self.device
             .write_data(command.protocol(), &command.command_bytes())
-            .map(|_| ())
+            .map(|_| ());
+        
+        if let Err(Xum1541Error::Communication { kind: CommunicationKind::StatusValue { value: _ } }) = result {  // Note: 'result' needs to be the expression you're matching on
+            match command {
+                BusCommand::Talk(_) | BusCommand::Listen(_) | BusCommand::Open(_) => {
+                    debug!("Bus command {command} failed, setting bus back to Idle");
+                    self.mode = BusMode::Idle;
+                },
+                _ => debug!("Bus command {command} failed, leaving bus in state {}", self.mode),
+            }
+        }        result
     }
 }
 
