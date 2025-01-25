@@ -1,7 +1,13 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [0.2.0] - 2025-01-24
+## [0.1.2] - 2025-01-??
+### Added
+
+### Changed
+- Downgraded error! to warn! logging - to avoid double error logging problems which the library user will also like log (and likely as error).  Reserve error! for unrecoverable error in xum1541.
+
+## [0.1.1] - 2025-01-24
 ### Added
 - Bus::get_eoi and Bus::clear_eoi functions
 - Removed BusCommand::trace_message
