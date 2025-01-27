@@ -625,7 +625,7 @@ impl Device {
         let serial_num = serial_num.unwrap_or(0);
         for device in context.devices()?.iter() {
             let device_desc = device.device_descriptor()?;
-            debug!(
+            trace!(
                 "Found USB device {:04x}:{:04x}",
                 device_desc.vendor_id(),
                 device_desc.product_id()
