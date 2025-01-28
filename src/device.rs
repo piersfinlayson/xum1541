@@ -650,7 +650,7 @@ impl Device {
                     Ok(serial) => {
                         if let Ok(num) = serial.parse::<u8>() {
                             if num == serial_num {
-                                info!("Found device with matching serial number {num}");
+                                debug!("Found device with matching serial number {num}");
                                 return Ok((device, handle));
                             }
                             found_serial_nums.push(num);
@@ -660,7 +660,7 @@ impl Device {
                         }
                     }
                     Err(e) => {
-                        warn!("Couldn't read device serial number: {}", e);
+                        info!("Couldn't read device serial number: {}", e);
                         if serial_num == 0 {
                             // Despite failing to read the serial number
                             // we can still use the device if serial
@@ -699,7 +699,7 @@ impl Device {
     // accidently resetting and then not re-initializing
     fn hard_reset_pre_init(&self) -> Result<(), Error> {
         trace!("Device::hard_reset_pre_init");
-        info!("Hard reset the device");
+        debug!("Hard reset the device");
         self.handle.reset()?;
         sleep(DEFAULT_USB_RESET_SLEEP);
         trace!("Reset should be commplete, continue");
