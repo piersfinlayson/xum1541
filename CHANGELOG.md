@@ -1,6 +1,12 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2025-??-??
+### Added
+
+### Changed
+- Handled xum1541 timeouts better
+
 ## [0.2.0] - 2025-01-27
 ### Added
 

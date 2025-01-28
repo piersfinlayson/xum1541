@@ -538,6 +538,7 @@ impl Device {
         trace!("Device::wait_for_status");
 
         let mut status_buf = vec![0u8; STATUS_BUF_SIZE];
+        let mut timeouts = 0;
         loop {
             trace!("Read bulk endpoint 0x{:02x}", BULK_IN_ENDPOINT);
             match self
@@ -598,8 +599,15 @@ impl Device {
                 }
                 Err(e) => match e {
                     e @ rusb::Error::Timeout => {
+                        if timeouts > 5 {
+                            // TODO this might be a good time to reset the
+                            // device
+                            warn!("Too many timeouts waiting for xum1541");
+                            break Err(Timeout { dur: DEFAULT_READ_TIMEOUT * timeouts});
+                        }
                         debug!("Timeout waiting for device status {}", e);
                         let _ = sleep(DEFAULT_USB_LOOP_SLEEP);
+                        timeouts += 1;
                         continue;
                     }
                     other_error => {
