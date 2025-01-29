@@ -1,14 +1,17 @@
 //! [`Bus`] is the main interface for accessing Commodore disk drives and the IEC/IEEE-488 bus via the XUM1541.  Its use it preferred over direct use of [`Device`].
 
-use crate::buscmd::{BusCommand, BusMode, DeviceChannel};
+pub mod buscmd;
+
 #[allow(unused_imports)]
 use crate::constants::*;
 use crate::error::CommunicationKind;
+use crate::remoteusb::RemoteUsbDevice;
+use crate::usb::{UsbDevice, UsbDeviceConfig};
 #[allow(unused_imports)]
 use crate::Error::{self, *};
 use crate::{Device, DeviceInfo, SpecificDeviceInfo};
-use crate::usb::{UsbDevice, UsbDeviceConfig};
-use crate::UsbBus;
+use crate::{RemoteUsbBus, UsbBus};
+use buscmd::{BusCommand, BusMode, DeviceChannel};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -44,6 +47,14 @@ pub struct Bus<D: Device> {
 impl UsbBus {
     pub fn default() -> Result<Self, Error> {
         UsbBusBuilder::new().build()
+    }
+}
+
+impl RemoteUsbBus {
+    pub fn default() -> Result<Self, Error> {
+        // TODO - create a builder
+        let device = RemoteUsbDevice::new(None)?;
+        Ok(RemoteUsbBus::new(device, DEFAULT_BUS_TIMEOUT))
     }
 }
 
@@ -577,17 +588,17 @@ impl Bus<UsbDevice> {
 /// A builder pattern for creating [`Bus`] instances with custom configuration.
 pub trait BusBuilder {
     type Device: Device;
-    
+
     fn new() -> Self;
     fn build(&mut self) -> Result<Bus<Self::Device>, Error>;
 }
 
 /// A builder pattern for creating [`Bus`] instances using a UsbDevice and
 /// custom configuration.
-/// 
+///
 /// Allows setting optional parameters like serial number, timeout, and USB context
 /// before creating the final [`Bus`] instance.
-/// 
+///
 /// # Examples
 ///
 /// ## A simple example

@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
 use rusb::UsbContext;
-use xum1541::{BusBuilder, UsbBusBuilder, DeviceChannel};
+use xum1541::{BusBuilder, DeviceChannel, UsbBusBuilder};
 mod common;
 use common::AppError;
 
@@ -42,7 +42,10 @@ fn code() -> Result<(), AppError> {
     }
     println!("USB information:");
     if let Some(usb_info) = bus.device_specific_info() {
-        println!("  Vendor ID/Product ID: {:04x}:{:04x}", usb_info.vendor_id, usb_info.product_id);
+        println!(
+            "  Vendor ID/Product ID: {:04x}:{:04x}",
+            usb_info.vendor_id, usb_info.product_id
+        );
         println!("  Bus: {:03}", usb_info.bus_number);
         println!("  Device: {:03}", usb_info.device_address);
     } else {

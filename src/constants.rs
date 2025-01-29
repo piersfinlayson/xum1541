@@ -1,5 +1,6 @@
 //! Constants used in the XUM1541 implementation
 use rusb::constants::{LIBUSB_ENDPOINT_IN, LIBUSB_ENDPOINT_OUT};
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// XUM1541 device info
@@ -154,7 +155,7 @@ pub const DRIVE_COMMAND_CHANNEL: u8 = 15;
 
 /// Ioctls supported by [`crate::Device::ioctl`]
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Ioctl {
     GetEoi = 23,
     ClearEoi = 24,
@@ -175,6 +176,7 @@ pub enum Ioctl {
     TapWaitForStopSense = 71,
     TapWaitForPlaySense = 72,
     TapMotorOff = 73,
+    Unknown = 255,
 }
 
 impl Ioctl {
@@ -186,6 +188,33 @@ impl Ioctl {
     /// Whether the Ioctl is a syncronous one
     pub fn is_sync(&self) -> bool {
         !self.is_async()
+    }
+}
+
+impl From<u8> for Ioctl {
+    fn from(value: u8) -> Self {
+        match value {
+            23 => Self::GetEoi,
+            24 => Self::ClearEoi,
+            25 => Self::PpRead,
+            26 => Self::PpWrite,
+            27 => Self::IecPoll,
+            28 => Self::IecWait,
+            29 => Self::IecSetRelease,
+            30 => Self::ParburstRead,
+            31 => Self::ParburstWrite,
+            32 => Self::SrqburstRead,
+            33 => Self::SrqburstWrite,
+            66 => Self::TapMotorOn,
+            67 => Self::TapGetVer,
+            68 => Self::TapPrepareCapture,
+            69 => Self::TapPrepareWrite,
+            70 => Self::TapGetSense,
+            71 => Self::TapWaitForStopSense,
+            72 => Self::TapWaitForPlaySense,
+            73 => Self::TapMotorOff,
+            _ => Self::Unknown,
+        }
     }
 }
 
@@ -211,6 +240,7 @@ impl std::fmt::Display for Ioctl {
             Self::TapWaitForStopSense => write!(f, "TapWaitForStopSense"),
             Self::TapWaitForPlaySense => write!(f, "TapWaitForPlaySense"),
             Self::TapMotorOff => write!(f, "TapMotorOff"),
+            Self::Unknown => write!(f, "Unknown"),
         }
     }
 }

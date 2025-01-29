@@ -84,6 +84,10 @@ pub enum CommunicationKind {
     /// Timed out waiting for a status response from the device
     #[error("Timed out waiting for a status response from the device")]
     StatusTimeout { dur: std::time::Duration },
+
+    /// Hit an error talking to a remote
+    #[error("Hit an error communicating with a remote device: {0}")]
+    Remote(String),
 }
 
 #[derive(Debug, Error, PartialEq, Serialize, Deserialize)]

@@ -62,9 +62,9 @@
 //!     .build().unwrap();
 //!     
 //! bus.initialize().unwrap();
-//! 
+//!
 //! // Or
-//! 
+//!
 //! let bus = UsbBus::default().unwrap();
 //! bus.initialize().unwrap();
 //! ```
@@ -237,7 +237,6 @@
 //! - Commodore community
 
 pub mod bus;
-pub mod buscmd;
 pub mod constants;
 pub mod device;
 pub mod error;
@@ -246,8 +245,10 @@ pub use crate::bus::{Bus, BusBuilder, UsbBusBuilder, DEFAULT_BUS_TIMEOUT};
 
 /// Use to create a Bus object via a USB-connected XUM1541 device
 pub type UsbBus = Bus<UsbDevice>;
-pub use crate::buscmd::DeviceChannel;
+pub type RemoteUsbBus = Bus<RemoteUsbDevice>;
+pub use crate::bus::buscmd::DeviceChannel;
 pub use crate::constants::Ioctl;
+pub use crate::device::remoteusb::{RemoteUsbDevice, RemoteUsbDeviceConfig, UsbDeviceServer};
+pub use crate::device::usb::{UsbDevice, UsbDeviceConfig, UsbInfo};
 pub use crate::device::*;
-pub use crate::device::usb::*;
 pub use crate::error::{CommunicationKind, DeviceAccessKind, Error};

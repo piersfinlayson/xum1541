@@ -1,10 +1,9 @@
-
 #[allow(unused_imports)]
 use crate::constants::*;
 use crate::error::{CommunicationKind, InternalError};
 use crate::DeviceAccessKind::*;
 use crate::Error::{self, *};
-use crate::{Device, DeviceInfo, DeviceDebugInfo};
+use crate::{Device, DeviceDebugInfo, DeviceInfo};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -69,7 +68,10 @@ impl SpecificDeviceInfo for UsbDevice {
     fn print_specific(&self) {
         if let Some(info) = self.specific_info() {
             println!("  - device: {:04x}:{:04x}", info.vendor_id, info.product_id);
-            println!("  - bus/address: {:03}-{:03}", info.bus_number, info.device_address);
+            println!(
+                "  - bus/address: {:03}-{:03}",
+                info.bus_number, info.device_address
+            );
         } else {
             println!("  - no USB device information");
         }
@@ -100,7 +102,7 @@ impl Device for UsbDevice {
         // Create the rusb:Context if we weren't provided one
         let context = match config.context {
             Some(ctx) => ctx,
-            None => Context::new()?
+            None => Context::new()?,
         };
         config.context = Some(context.clone());
 
@@ -381,7 +383,9 @@ impl Device for UsbDevice {
                             // TODO this might be a good time to reset the
                             // device
                             warn!("Too many timeouts waiting for xum1541");
-                            break Err(Timeout { dur: DEFAULT_READ_TIMEOUT * timeouts});
+                            break Err(Timeout {
+                                dur: DEFAULT_READ_TIMEOUT * timeouts,
+                            });
                         }
                         debug!("Timeout waiting for device status {}", e);
                         let _ = sleep(DEFAULT_USB_LOOP_SLEEP);
@@ -435,7 +439,6 @@ impl Device for UsbDevice {
 
 /// Private Device functions
 impl UsbDevice {
-
     /// Enumerate the bus, find the appropriate device and open it
     fn find_device(
         context: &Context,
@@ -636,7 +639,7 @@ impl UsbDevice {
             status: 0,           // Will be set later
             debug_info: None,    // Will be set later
         };
-        
+
         // Set up USB device info
         let usb_info = UsbInfo {
             vendor_id: device_desc.vendor_id(),

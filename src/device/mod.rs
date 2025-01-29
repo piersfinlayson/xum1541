@@ -3,16 +3,20 @@
 //! It is unlikely you need to use this interface directly unless you are
 //! re-implementing [`crate::Bus`] or adding to it.
 
+pub mod remoteusb;
 pub mod usb;
 
-use crate::{Error, Ioctl};
+use serde::{Deserialize, Serialize};
+pub use usb::UsbDevice;
+
 use crate::constants::*;
+use crate::{Error, Ioctl};
 
 /// The core Device trait, which allows Device to be mocked out for testing
 pub trait Device {
     type Config;
 
-    /// Creates a new Device using the provided config, which can be 
+    /// Creates a new Device using the provided config, which can be
     /// omitted in order to create a Device using default configuration.
     ///
     /// # Arguments
@@ -25,7 +29,7 @@ pub trait Device {
     ///
     /// Note that the Device returned has not been initialized.  It must be
     /// initialized before use with [`Device::init`].
-    /// 
+    ///
     /// # Example
     ///
     /// ```rust,no_run
@@ -37,25 +41,26 @@ pub trait Device {
     /// // Now do device.init().unwrap(); etc
     /// ```
     fn new(config: Option<Self::Config>) -> Result<Self, Error>
-    where Self: Sized;
+    where
+        Self: Sized;
 
     /// Retrieve this Device's current configuration state
-    /// 
+    ///
     /// # Returns
     /// * `Some(&Self::Config)` - The current configuration state of this device
     /// * `None` - There is no configuration state to expose
-    /// 
+    ///
     /// The configuration returned may include both user-provided settings and
     /// implementation-specific state that was created during device
     /// initialization.  For example, a USB device might return a
     /// configuration containing its [`rusb::Context`]even if one wasn't
     /// provided during construction.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```rust,no_run
     /// use xum1541::{Device, UsbDevice};
-    /// 
+    ///
     /// let device = UsbDevice::new(None).unwrap();
     /// if let Some(config) = device.current_config() {
     ///     println!("Device returned some current config {:?}", config);
@@ -176,11 +181,12 @@ pub trait Device {
     /// # Returns
     /// * `Ok(Option<u16>)` - 2 byte status from the device, or None for an asyncronous ioctl, as this function does not wait after async ioctl
     /// * `Err(Error)` - On failure
-    fn ioctl(&self, ioctl: Ioctl, address: u8, secondary_address: u8) -> Result<Option<u16>, Error>;
+    fn ioctl(&self, ioctl: Ioctl, address: u8, secondary_address: u8)
+        -> Result<Option<u16>, Error>;
 }
 
 /// DeviceInfo contains information read from the XUM1541 device.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
     /// Product [`String`] from the USB device
     pub product: String,
@@ -274,7 +280,7 @@ impl DeviceInfo {
 
 /// DeviceDebugInfo contains some additional data from XUM1541 supporting
 /// firmware version 8 and onwards.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceDebugInfo {
     /// Git revision of the code the device firmware was built from
     pub git_rev: Option<String>,
