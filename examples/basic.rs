@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
 use rusb::UsbContext;
-use xum1541::{BusBuilder, DeviceChannel};
+use xum1541::{BusBuilder, UsbBusBuilder, DeviceChannel};
 mod common;
 use common::AppError;
 
@@ -13,7 +13,7 @@ fn code() -> Result<(), AppError> {
     // Create bus - this opens the USB device and creates and initializations
     // Device as well under the covers
     info!("Create and open device");
-    let mut builder = BusBuilder::new().context(context);
+    let mut builder = UsbBusBuilder::new().context(context);
     let mut bus = builder.build()?;
 
     // Initialize the bus
@@ -39,6 +39,14 @@ fn code() -> Result<(), AppError> {
         info.print_debug();
     } else {
         println!("  No device info available");
+    }
+    println!("USB information:");
+    if let Some(usb_info) = bus.device_specific_info() {
+        println!("  Vendor ID/Product ID: {:04x}:{:04x}", usb_info.vendor_id, usb_info.product_id);
+        println!("  Bus: {:03}", usb_info.bus_number);
+        println!("  Device: {:03}", usb_info.device_address);
+    } else {
+        println!("  No USB info available");
     }
 
     // Rese the bus.

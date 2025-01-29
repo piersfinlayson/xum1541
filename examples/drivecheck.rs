@@ -12,7 +12,7 @@
 /// Note however that there are other reasons why the xum1541 may return
 /// a status value of 0x0000.  See OpenCbm/xum1541/iec.c, function
 /// iec_raw_write() for these cases.
-use xum1541::{BusBuilder, CommunicationKind, DeviceChannel, Error};
+use xum1541::{BusBuilder, UsbBusBuilder, CommunicationKind, DeviceChannel, Error};
 mod common;
 use common::AppError;
 use env_logger;
@@ -35,7 +35,7 @@ fn main() -> Result<(), AppError> {
     env_logger::init();
 
     // Connect to the XUM1541 device
-    let mut bus = BusBuilder::new().build()?;
+    let mut bus = UsbBusBuilder::new().build()?;
 
     // Initialize the bus
     bus.initialize()?;

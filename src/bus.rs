@@ -6,7 +6,9 @@ use crate::constants::*;
 use crate::error::CommunicationKind;
 #[allow(unused_imports)]
 use crate::Error::{self, *};
-use crate::{Device, DeviceInfo};
+use crate::{Device, DeviceInfo, SpecificDeviceInfo};
+use crate::usb::{UsbDevice, UsbDeviceConfig};
+use crate::UsbBus;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -33,14 +35,20 @@ pub const DEFAULT_BUS_TIMEOUT: Duration = Duration::from_secs(60);
 ///
 /// Use [`BusBuilder`] to create a new [`Bus`] (and [`Device`]) instance.
 #[derive(Debug)]
-pub struct Bus {
-    device: Device,
+pub struct Bus<D: Device> {
+    device: D,
     _timeout: Duration,
     mode: BusMode,
 }
 
+impl UsbBus {
+    pub fn default() -> Result<Self, Error> {
+        UsbBusBuilder::new().build()
+    }
+}
+
 /// Public [`Bus`] functions
-impl Bus {
+impl<D: Device> Bus<D> {
     /// Creates a new bus instance. Use if you have manually created a [`Device`] instance.
     ///
     /// # Args:
@@ -54,13 +62,13 @@ impl Bus {
     ///
     /// # Example
     /// ```no_run
-    /// use xum1541::{Bus, Device, DEFAULT_BUS_TIMEOUT};
-    /// let device = Device::new(None).unwrap();  // serial_num = None to auto select device
+    /// use xum1541::{Bus, Device, UsbDevice, DEFAULT_BUS_TIMEOUT};
+    /// let device = UsbDevice::new(None).unwrap();  // serial_num = None to auto select device
     /// let mut bus = Bus::new(device, DEFAULT_BUS_TIMEOUT);
     /// // Now initialize both the Bus and Device simultaneously
     /// bus.initialize();
     /// ```
-    pub fn new(device: Device, timeout: Duration) -> Self {
+    pub fn new(device: D, timeout: Duration) -> Self {
         trace!("Bus::new");
         Bus {
             device,
@@ -360,17 +368,6 @@ impl Bus {
         self.device.wait_for_status()
     }
 
-    /// Retrieve the underlying [`Device`] context.
-    ///
-    /// May be used to share with other rusb instances, and to set the log
-    /// level of rusb.
-    ///
-    /// # Returns
-    /// * `&Context` - the context used by the device
-    pub fn device_context(&self) -> &Context {
-        self.device.context()
-    }
-
     /// Retrieve information about the underlying device.
     ///
     /// # Returns
@@ -403,7 +400,7 @@ impl Bus {
 }
 
 /// Private functions for Bus
-impl Bus {
+impl<D: Device> Bus<D> {
     /// Read a single byte from the bus.
     ///
     /// # Returns
@@ -571,43 +568,60 @@ impl Bus {
     }
 }
 
-/// A builder pattern implementation for creating [`Bus`] instances with custom configuration.
-///
+impl Bus<UsbDevice> {
+    pub fn device_specific_info(&self) -> Option<&crate::usb::UsbInfo> {
+        self.device.specific_info()
+    }
+}
+
+/// A builder pattern for creating [`Bus`] instances with custom configuration.
+pub trait BusBuilder {
+    type Device: Device;
+    
+    fn new() -> Self;
+    fn build(&mut self) -> Result<Bus<Self::Device>, Error>;
+}
+
+/// A builder pattern for creating [`Bus`] instances using a UsbDevice and
+/// custom configuration.
+/// 
 /// Allows setting optional parameters like serial number, timeout, and USB context
 /// before creating the final [`Bus`] instance.
+/// 
+/// # Examples
 ///
-/// # Example
-///
-/// # A simple example
+/// ## A simple example
 ///
 /// ```no_run
-/// use xum1541::BusBuilder;
+/// use xum1541::{BusBuilder, UsbBusBuilder};
 ///
-/// let bus = BusBuilder::new()
+/// let bus = UsbBusBuilder::new()
 ///     .build()
 ///     .unwrap();
 /// ```
 ///
-/// # A more complex example
+/// ## A more complex example
 ///
 /// ```no_run
-/// use xum1541::{BusBuilder, DEFAULT_BUS_TIMEOUT};
+/// use xum1541::{BusBuilder, UsbBusBuilder, DEFAULT_BUS_TIMEOUT};
 /// use std::time::Duration;
 ///
-/// let bus = BusBuilder::new()
+/// let bus = UsbBusBuilder::new()
 ///     .serial_number(1)
 ///     .timeout(DEFAULT_BUS_TIMEOUT)
 ///     .build()
 ///     .unwrap();
 /// ```
-pub struct BusBuilder {
+pub struct UsbBusBuilder {
     xum_serial_number: Option<u8>,
     timeout: Option<Duration>,
     context: Option<Context>,
-    device: Option<Device>,
+    device: Option<UsbDevice>,
 }
 
-impl BusBuilder {
+impl BusBuilder for UsbBusBuilder {
+    type Device = UsbDevice;
+
     /// Creates a new [`BusBuilder`] instance with default values.
     ///
     /// All fields are initialized to None and can be set using the builder methods.
@@ -617,8 +631,8 @@ impl BusBuilder {
     ///
     /// # Example
     /// See [`BusBuilder`] documentation
-    pub fn new() -> Self {
-        BusBuilder {
+    fn new() -> Self {
+        UsbBusBuilder {
             xum_serial_number: None,
             timeout: None,
             context: None,
@@ -626,6 +640,36 @@ impl BusBuilder {
         }
     }
 
+    /// Builds and returns a new [`Bus`] instance using the configured parameters.
+    ///
+    /// # Returns
+    /// * `Ok(Bus)` - the constructed Bus instance if successful
+    /// * `Err(Error)` - if an error occurred during construction
+    ///
+    /// # Example
+    /// See [`BusBuilder`]
+    ///
+    /// # Notes:
+    /// * Uses default values for any parameters that weren't set:
+    ///   * serial_number: 0 (take first device found)
+    ///   * timeout: [`DEFAULT_BUS_TIMEOUT`]
+    ///   * context: new Context with LogLevel::Info
+    /// * Will create a new [`Device`] unless one was explicitly provided
+    fn build(&mut self) -> Result<Bus<UsbDevice>, Error> {
+        // Create the Device if necessary
+        let device = if self.device.is_none() {
+            self.create_device()?
+        } else {
+            self.device.take().unwrap()
+        };
+
+        // Create Bus
+        let timeout = self.timeout.unwrap_or(DEFAULT_BUS_TIMEOUT);
+        Ok(Bus::new(device, timeout))
+    }
+}
+
+impl UsbBusBuilder {
     /// Sets the XUM-1541 device serial number to use.
     ///
     /// # Args:
@@ -669,12 +713,12 @@ impl BusBuilder {
     ///
     /// ```rust,no_run
     /// use rusb::{Context, UsbContext};
-    /// use xum1541::BusBuilder;
+    /// use xum1541::{BusBuilder, UsbBusBuilder};
     ///
     /// let mut context = Context::new().unwrap();
     /// context.set_log_level(rusb::LogLevel::Debug);
     ///
-    /// let bus = BusBuilder::new()
+    /// let bus = UsbBusBuilder::new()
     ///     .context(context)
     ///     .build()
     ///     .unwrap();
@@ -687,38 +731,24 @@ impl BusBuilder {
         self
     }
 
-    /// Builds and returns a new [`Bus`] instance using the configured parameters.
-    ///
-    /// # Returns
-    /// * `Ok(Bus)` - the constructed Bus instance if successful
-    /// * `Err(Error)` - if an error occurred during construction
-    ///
-    /// # Example
-    /// See [`BusBuilder`]
-    ///
-    /// # Notes:
-    /// * Uses default values for any parameters that weren't set:
-    ///   * serial_number: 0 (take first device found)
-    ///   * timeout: [`DEFAULT_BUS_TIMEOUT`]
-    ///   * context: new Context with LogLevel::Info
-    /// * Will create a new [`Device`] unless one was explicitly provided
-    pub fn build(&mut self) -> Result<Bus, Error> {
-        // Create the Device
-        let device = if self.device.is_none() {
-            if self.context.is_some() {
-                let context = self.context.take().unwrap();
-                Device::with_context(context, self.xum_serial_number)?
-            } else {
-                let mut context = rusb::Context::new()?;
-                context.set_log_level(rusb::LogLevel::Info);
-                Device::with_context(context, self.xum_serial_number)?
-            }
+    /// Create the Device instance using the configured parameters
+    fn create_device(&mut self) -> Result<UsbDevice, Error> {
+        // Get or create the context
+        let context = if self.context.is_some() {
+            self.context.take().unwrap()
         } else {
-            self.device.take().unwrap()
+            let mut context = rusb::Context::new()?;
+            context.set_log_level(rusb::LogLevel::Info);
+            context
         };
 
-        // Create Bus
-        let timeout = self.timeout.unwrap_or(DEFAULT_BUS_TIMEOUT);
-        Ok(Bus::new(device, timeout))
+        // Create DeviceConfig
+        let config = UsbDeviceConfig {
+            context: Some(context),
+            serial_num: self.xum_serial_number,
+        };
+
+        // Create the Device
+        UsbDevice::new(Some(config))
     }
 }

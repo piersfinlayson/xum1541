@@ -1,11 +1,16 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [0.2.1] - 2025-??-??
+## [0.3.0] - 2025-??-??
 ### Added
+- Added [`Device`] as a trait, to allow other device types and easier mocking.  As part of this changed the existing set of functions
+- Similarly made [`BusBuilder`] a trait, to allow creation of [`Bus`] using other device types.
 
 ### Changed
 - Handled xum1541 timeouts better
+- Renamed [`Device`] to [`UsbDevice`]
+- Renamed [`BusBuilder`] to [`UsbBusBuilder`]
+- Removed [`Bus::device_context`]
 
 ## [0.2.0] - 2025-01-27
 ### Added

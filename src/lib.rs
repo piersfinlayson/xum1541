@@ -49,15 +49,23 @@
 //!
 //! ## Getting Started
 //!
-//! The recommended way to create a new xum1541 interface is through the `BusBuilder`:
+//! The recommended way to create a new xum1541 interface is either through
+//! [`BusBuilder`] (or a device type specific one such as [`UsbBusBuilder`]),
+//! Or using the default() function on the device specific [`Bus`] type, such
+//! ass [`UsbBus`].
 //!
 //! ```rust,no_run
-//! use xum1541::BusBuilder;
+//! use xum1541::{UsbBus, BusBuilder, UsbBusBuilder};
 //!
-//! let mut bus = BusBuilder::new()
+//! let mut bus = UsbBusBuilder::new()
 //!     .serial_number(0)  // Use first available device
 //!     .build().unwrap();
 //!     
+//! bus.initialize().unwrap();
+//! 
+//! // Or
+//! 
+//! let bus = UsbBus::default().unwrap();
 //! bus.initialize().unwrap();
 //! ```
 //!
@@ -100,12 +108,12 @@
 //!
 //! ```rust,no_run
 //! use rusb::{Context, UsbContext};
-//! use xum1541::BusBuilder;
+//! use xum1541::{BusBuilder, UsbBusBuilder};
 //!
 //! let mut context = Context::new().unwrap();
 //! context.set_log_level(rusb::LogLevel::Debug);
 //!
-//! let bus = BusBuilder::new()
+//! let bus = UsbBusBuilder::new()
 //!     .context(context)
 //!     .build()
 //!     .unwrap();
@@ -139,11 +147,11 @@
 //! * [`examples/basic.rs`](examples/basic.rs) - A more complex example which enables logging (run with `RUST_LOG=info`` for example) queries the device's capabilities and drive status.
 //!
 //! ```rust,no_run
-//! use xum1541::{BusBuilder, DeviceChannel, Error};
+//! use xum1541::{BusBuilder, UsbBusBuilder, DeviceChannel, Error};
 //!
 //! fn main() -> Result<(), Error> {
 //!     // Connect to the XUM1541 device
-//!     let mut bus = BusBuilder::new().build()?;
+//!     let mut bus = UsbBusBuilder::new().build()?;
 //!
 //!     // Initialize the bus
 //!     bus.initialize()?;
@@ -234,8 +242,12 @@ pub mod constants;
 pub mod device;
 pub mod error;
 
-pub use crate::bus::{Bus, BusBuilder, DEFAULT_BUS_TIMEOUT};
+pub use crate::bus::{Bus, BusBuilder, UsbBusBuilder, DEFAULT_BUS_TIMEOUT};
+
+/// Use to create a Bus object via a USB-connected XUM1541 device
+pub type UsbBus = Bus<UsbDevice>;
 pub use crate::buscmd::DeviceChannel;
 pub use crate::constants::Ioctl;
 pub use crate::device::*;
+pub use crate::device::usb::*;
 pub use crate::error::{CommunicationKind, DeviceAccessKind, Error};
