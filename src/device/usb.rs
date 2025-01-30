@@ -1,9 +1,13 @@
-#[allow(unused_imports)]
-use crate::constants::*;
-use crate::error::{CommunicationKind, InternalError};
-use crate::DeviceAccessKind::*;
-use crate::Error::{self, *};
-use crate::{Device, DeviceDebugInfo, DeviceInfo};
+use crate::constants::{
+    BULK_IN_ENDPOINT, BULK_OUT_ENDPOINT, CTRL_GCCVER, CTRL_GITREV, CTRL_INIT, CTRL_LIBCVER,
+    CTRL_RESET, CTRL_SHUTDOWN, CUR_FW_VERSION, DEFAULT_CONTROL_TIMEOUT, DEFAULT_READ_TIMEOUT,
+    DEFAULT_USB_LOOP_SLEEP, DEFAULT_USB_RESET_SLEEP, DEFAULT_WRITE_TIMEOUT, DEV_INFO_SIZE, IO_BUSY,
+    IO_ERROR, IO_READY, MAX_XFER_SIZE, MIN_FW_VERSION, PROTO_CBM, PROTO_MASK, READ,
+    STATUS_BUF_SIZE, STATUS_DOING_RESET, WRITE, XUM1541_PID, XUM1541_VID,
+};
+use crate::Ioctl;
+use crate::{CommunicationError, DeviceAccessError, Error, InternalError};
+use crate::{Device, DeviceDebugInfo, DeviceInfo, SpecificDeviceInfo};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
@@ -13,8 +17,6 @@ use rusb::{constants, Context, DeviceDescriptor, UsbContext};
 use std::cmp::min;
 use std::str::from_utf8;
 use std::thread::sleep;
-
-use super::SpecificDeviceInfo;
 
 /// Device represents the physical XUM1541 USB adapter.
 ///
@@ -44,6 +46,15 @@ pub struct UsbDeviceConfig {
     /// detected device of the correct type will be used.  If set to 0, only
     /// a device with a zero serial number will be matched.
     pub serial_num: Option<u8>,
+}
+
+impl Default for UsbDeviceConfig {
+    fn default() -> Self {
+        Self {
+            context: None,
+            serial_num: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -131,7 +142,7 @@ impl Device for UsbDevice {
         Ok(())
     }
 
-    fn info(&self) -> Option<&DeviceInfo> {
+    fn info(&mut self) -> Option<&DeviceInfo> {
         trace!("Device::info");
         self.info.as_ref()
     }
@@ -147,7 +158,7 @@ impl Device for UsbDevice {
         self.init()
     }
 
-    fn read_control(&self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize, Error> {
+    fn read_control(&mut self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize, Error> {
         trace!(
             "Device::read_control request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
@@ -172,7 +183,7 @@ impl Device for UsbDevice {
             .map_err(|e| e.into())
     }
 
-    fn write_control(&self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Error> {
+    fn write_control(&mut self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Error> {
         trace!(
             "Device::write_control request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
@@ -198,8 +209,8 @@ impl Device for UsbDevice {
             // Wait for status response
             let status = self.wait_for_status()?;
             if status == 0 {
-                return Err(Communication {
-                    kind: CommunicationKind::StatusValue { value: status },
+                return Err(Error::Communication {
+                    kind: CommunicationError::StatusValue { value: status },
                 }
                 .into());
             }
@@ -209,7 +220,7 @@ impl Device for UsbDevice {
         Ok(())
     }
 
-    fn write_data(&self, mode: u8, data: &[u8]) -> Result<usize, Error> {
+    fn write_data(&mut self, mode: u8, data: &[u8]) -> Result<usize, Error> {
         let size = data.len();
         trace!("Device::write_data mode b{mode:08b} data.len() {size}");
 
@@ -219,7 +230,7 @@ impl Device for UsbDevice {
                 "Attempted to write {size} more than max supported number of bytes {MAX_XFER_SIZE}"
             );
             warn!("{message}");
-            return Err(Args { message });
+            return Err(Error::Args { message });
         }
 
         // Send the write command with 4-byte command buffer
@@ -257,8 +268,8 @@ impl Device for UsbDevice {
             if status != 0 {
                 Ok(status as usize)
             } else {
-                Err(Communication {
-                    kind: CommunicationKind::StatusValue { value: status },
+                Err(Error::Communication {
+                    kind: CommunicationError::StatusValue { value: status },
                 }
                 .into())
             }
@@ -267,7 +278,7 @@ impl Device for UsbDevice {
         }
     }
 
-    fn read_data(&self, mode: u8, buffer: &mut [u8]) -> Result<usize, Error> {
+    fn read_data(&mut self, mode: u8, buffer: &mut [u8]) -> Result<usize, Error> {
         let size = buffer.len();
         trace!("Device::read_data mode b{mode:08b} buffer.len() {size}");
 
@@ -277,13 +288,13 @@ impl Device for UsbDevice {
                 "Attempted to read {size} more than max supported number of bytes {MAX_XFER_SIZE}"
             );
             warn!("{message}");
-            return Err(Args { message });
+            return Err(Error::Args { message });
         }
         let buf_len = buffer.len();
         if size > buf_len {
             let message = format!("Attempted to read {size} more than buffer length {buf_len}");
             warn!("{message}");
-            return Err(Args { message });
+            return Err(Error::Args { message });
         }
 
         // Send read command with 4-byte command buffer
@@ -314,7 +325,7 @@ impl Device for UsbDevice {
         Ok(bytes_read)
     }
 
-    fn wait_for_status(&self) -> Result<u16, Error> {
+    fn wait_for_status(&mut self) -> Result<u16, Error> {
         trace!("Device::wait_for_status");
 
         let mut status_buf = vec![0u8; STATUS_BUF_SIZE];
@@ -354,15 +365,15 @@ impl Device for UsbDevice {
                         }
                         IO_ERROR => {
                             trace!("Device IO error");
-                            break Err(Communication {
-                                kind: CommunicationKind::StatusIo,
+                            break Err(Error::Communication {
+                                kind: CommunicationError::StatusIo,
                             });
                         }
                         num => {
                             let message = format!("Unexpected status from device {num}");
                             warn!("{message}");
-                            break Err(Communication {
-                                kind: CommunicationKind::StatusResponse { value: num },
+                            break Err(Error::Communication {
+                                kind: CommunicationError::StatusResponse { value: num },
                             });
                         }
                     }
@@ -373,8 +384,8 @@ impl Device for UsbDevice {
                         len,
                         STATUS_BUF_SIZE
                     );
-                    break Err(Communication {
-                        kind: CommunicationKind::StatusFormat,
+                    break Err(Error::Communication {
+                        kind: CommunicationError::StatusFormat,
                     });
                 }
                 Err(e) => match e {
@@ -383,7 +394,7 @@ impl Device for UsbDevice {
                             // TODO this might be a good time to reset the
                             // device
                             warn!("Too many timeouts waiting for xum1541");
-                            break Err(Timeout {
+                            break Err(Error::Timeout {
                                 dur: DEFAULT_READ_TIMEOUT * timeouts,
                             });
                         }
@@ -401,7 +412,7 @@ impl Device for UsbDevice {
         }
     }
     fn ioctl(
-        &self,
+        &mut self,
         ioctl: Ioctl,
         address: u8,
         secondary_address: u8,
@@ -491,8 +502,8 @@ impl UsbDevice {
 
         let err = if found_serial_nums.len() > 0 {
             info!("No matching XUM1541 device found {serial_num}, but found non-matching serial(s) {found_serial_nums:?}");
-            DeviceAccess {
-                kind: SerialMismatch {
+            Error::DeviceAccess {
+                kind: DeviceAccessError::SerialMismatch {
                     vid: XUM1541_VID,
                     pid: XUM1541_PID,
                     actual: found_serial_nums,
@@ -501,8 +512,8 @@ impl UsbDevice {
             }
         } else {
             info!("No suitable XUM1541 device found");
-            DeviceAccess {
-                kind: NotFound {
+            Error::DeviceAccess {
+                kind: DeviceAccessError::NotFound {
                     vid: XUM1541_VID,
                     pid: XUM1541_PID,
                 },
@@ -621,7 +632,7 @@ impl UsbDevice {
         // Verify product string
         debug!("Product string: {}", product);
         if !product.contains("xum1541") {
-            return Err(Init {
+            return Err(Error::Init {
                 message: format!("Device product string {} didn't contain xum1541", product),
             });
         }
@@ -656,7 +667,7 @@ impl UsbDevice {
         trace!("Device::read_product_string device_desc {device_desc:?}");
         self.handle
             .read_product_string_ascii(device_desc)
-            .map_err(|_| Init {
+            .map_err(|_| Error::Init {
                 message: "Couldn't read device product string".into(),
             })
     }
@@ -705,8 +716,8 @@ impl UsbDevice {
 
         // Verify firmware version
         if info.firmware_version < MIN_FW_VERSION {
-            return Err(DeviceAccess {
-                kind: FirmwareVersion {
+            return Err(Error::DeviceAccess {
+                kind: DeviceAccessError::FirmwareVersion {
                     actual: info.firmware_version,
                     expected: MIN_FW_VERSION,
                 },
@@ -829,15 +840,15 @@ mod tests {
         assert!(matches!(
             // If no XUM1541 is connected
             result,
-            Err(DeviceAccess {
-                kind: NotFound {
+            Err(Error::DeviceAccess {
+                kind: DeviceAccessError::NotFound {
                     vid: XUM1541_VID,
                     pid: XUM1541_PID
                 }
             }) |
             // If a device with serial anything other than 99 is connected
-            Err(DeviceAccess {
-                kind: SerialMismatch {
+            Err(Error::DeviceAccess {
+                kind: DeviceAccessError::SerialMismatch {
                     vid: XUM1541_VID,
                     pid: XUM1541_PID,
                     actual: _,

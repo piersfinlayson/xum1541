@@ -16,10 +16,6 @@ pub fn main() -> Result<(), Error> {
     info!("Client: Initialize the bus");
     bus.initialize()?;
 
-    // Reset the bus
-    info!("Client: Reset the bus");
-    bus.reset()?;
-
     // Tell the drive on device 8 to talk using channel 15
     info!("Client: Talk - device 8, channel 15");
     bus.talk(DeviceChannel::new(8, 15)?)?;

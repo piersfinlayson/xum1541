@@ -1,26 +1,23 @@
 //! [`Bus`] is the main interface for accessing Commodore disk drives and the IEC/IEEE-488 bus via the XUM1541.  Its use it preferred over direct use of [`Device`].
-
-pub mod buscmd;
-
+use crate::constants::{CTRL_RESET, PROTO_CBM};
 #[allow(unused_imports)]
-use crate::constants::*;
-use crate::error::CommunicationKind;
-use crate::remoteusb::RemoteUsbDevice;
-use crate::usb::{UsbDevice, UsbDeviceConfig};
-#[allow(unused_imports)]
-use crate::Error::{self, *};
-use crate::{Device, DeviceInfo, SpecificDeviceInfo};
-use crate::{RemoteUsbBus, UsbBus};
-use buscmd::{BusCommand, BusMode, DeviceChannel};
+use crate::DeviceChannel;
+use crate::Ioctl;
+use crate::{CommunicationError, Error};
+use crate::{Device, DeviceInfo};
+use cmd::{BusCommand, BusMode};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
-use rusb::{Context, UsbContext};
 use std::time::Duration;
 
+pub mod cmd;
+pub mod remoteusb;
+pub mod usb;
+
 /// Default Bus timeout - currently unused, but may be passed to [`Bus::new`]
-/// and [`BusBuilder::timeout`]
-pub const DEFAULT_BUS_TIMEOUT: Duration = Duration::from_secs(60);
+/// and [`crate::UsbBusBuilder::timeout`]
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The [`Bus`] struct is the main interface for accessing Commodore disk
 /// drives.  it provides key bus-level primitives.
@@ -38,24 +35,10 @@ pub const DEFAULT_BUS_TIMEOUT: Duration = Duration::from_secs(60);
 ///
 /// Use [`BusBuilder`] to create a new [`Bus`] (and [`Device`]) instance.
 #[derive(Debug)]
-pub struct Bus<D: Device> {
+pub struct Bus<D> {
     device: D,
     _timeout: Duration,
     mode: BusMode,
-}
-
-impl UsbBus {
-    pub fn default() -> Result<Self, Error> {
-        UsbBusBuilder::new().build()
-    }
-}
-
-impl RemoteUsbBus {
-    pub fn default() -> Result<Self, Error> {
-        // TODO - create a builder
-        let device = RemoteUsbDevice::new(None)?;
-        Ok(RemoteUsbBus::new(device, DEFAULT_BUS_TIMEOUT))
-    }
 }
 
 /// Public [`Bus`] functions
@@ -73,9 +56,9 @@ impl<D: Device> Bus<D> {
     ///
     /// # Example
     /// ```no_run
-    /// use xum1541::{Bus, Device, UsbDevice, DEFAULT_BUS_TIMEOUT};
+    /// use xum1541::{Bus, Device, UsbDevice, BUS_DEFAULT_TIMEOUT};
     /// let device = UsbDevice::new(None).unwrap();  // serial_num = None to auto select device
-    /// let mut bus = Bus::new(device, DEFAULT_BUS_TIMEOUT);
+    /// let mut bus = Bus::new(device, BUS_DEFAULT_TIMEOUT);
     /// // Now initialize both the Bus and Device simultaneously
     /// bus.initialize();
     /// ```
@@ -190,7 +173,7 @@ impl<D: Device> Bus<D> {
     ///
     /// # Note
     /// Will warn if bus is in listening mode when this is called.
-    pub fn read(&self, buf: &mut [u8]) -> Result<usize, Error> {
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
         trace!("Entered Bus::read buf.len(): {}", buf.len());
         Self::validate_read_params(buf, None, false)?;
         if let BusMode::Listening(_) = self.mode {
@@ -211,7 +194,7 @@ impl<D: Device> Bus<D> {
     ///
     /// # Note
     /// The pattern must not be empty and must be smaller than the buffer size.
-    pub fn read_until(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Error> {
+    pub fn read_until(&mut self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Error> {
         let size = buf.len();
         trace!(
             "Bus::read_until buf.len() {size} pattern.len() {}",
@@ -256,7 +239,7 @@ impl<D: Device> Bus<D> {
     /// # Note
     /// The pattern must not be empty and the buffer must be the size of the
     /// maximum desired read length.
-    pub fn read_until_any(&self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Error> {
+    pub fn read_until_any(&mut self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Error> {
         let size = buf.len();
         trace!(
             "Bus::read_until_any buf.len() {size} pattern.len() {}",
@@ -294,12 +277,12 @@ impl<D: Device> Bus<D> {
     ///
     /// # Note
     /// Will warn if bus is in talking mode when this is called.
-    pub fn write(&self, buf: &[u8]) -> Result<usize, Error> {
+    pub fn write(&mut self, buf: &[u8]) -> Result<usize, Error> {
         trace!("Entered Bus::write buf.len(): {}", buf.len());
         let size = buf.len();
         if size == 0 {
             warn!("Attempt to write 0 bytes");
-            return Err(Args {
+            return Err(Error::Args {
                 message: format!("Attempt to write 0 bytes"),
             });
         }
@@ -324,7 +307,7 @@ impl<D: Device> Bus<D> {
     /// Note - this function may be deprecated in a future version, and replaced
     /// with specific functions for required ioctls
     pub fn ioctl(
-        &self,
+        &mut self,
         ioctl: Ioctl,
         address: u8,
         secondary_address: u8,
@@ -338,12 +321,12 @@ impl<D: Device> Bus<D> {
     /// - `u16` - On success, a 2 byte status from the device
     /// - `Error` - On failure, including if there is no status
     /// response (because GetEoi is a syncronous command, hence we expect a status)
-    pub fn get_eoi(&self) -> Result<u16, Error> {
+    pub fn get_eoi(&mut self) -> Result<u16, Error> {
         trace!("Bus::get_eoi");
         self.device
             .ioctl(Ioctl::GetEoi, 0, 0)?
             .ok_or(Error::Communication {
-                kind: CommunicationKind::IoctlFailed,
+                kind: CommunicationError::IoctlFailed,
             })
     }
 
@@ -353,12 +336,12 @@ impl<D: Device> Bus<D> {
     /// - `u16` - On success, a 2 byte status from the device
     /// - `Error` - On failure, including if there is no status
     /// response (because GetEoi is a syncronous command, hence we expect a status)
-    pub fn clear_eoi(&self) -> Result<u16, Error> {
+    pub fn clear_eoi(&mut self) -> Result<u16, Error> {
         trace!("Bus::clear_eoi");
         self.device
             .ioctl(Ioctl::ClearEoi, 0, 0)?
             .ok_or(Error::Communication {
-                kind: CommunicationKind::IoctlFailed,
+                kind: CommunicationError::IoctlFailed,
             })
     }
 
@@ -375,7 +358,7 @@ impl<D: Device> Bus<D> {
     /// # Returns
     /// `Ok(u16)` - the 2 byte status value from the device
     /// `Err(Error)` - the error on failure
-    pub fn wait_for_status(&self) -> Result<u16, Error> {
+    pub fn wait_for_status(&mut self) -> Result<u16, Error> {
         self.device.wait_for_status()
     }
 
@@ -383,7 +366,7 @@ impl<D: Device> Bus<D> {
     ///
     /// # Returns
     /// * `Option<&DeviceInfo>` - device information if available
-    pub fn device_info(&self) -> Option<&DeviceInfo> {
+    pub fn device_info(&mut self) -> Option<&DeviceInfo> {
         self.device.info()
     }
 
@@ -417,7 +400,7 @@ impl<D: Device> Bus<D> {
     /// # Returns
     /// * `Ok(Option<u8>)` - the byte read if successful, None if EOF
     /// * `Err(Error)` - if an error occurred
-    fn read_one_byte(&self) -> Result<Option<u8>, Error> {
+    fn read_one_byte(&mut self) -> Result<Option<u8>, Error> {
         trace!("Bus::read_one_byte");
         let mut temp = vec![0u8; 1];
         match self.device.read_data(PROTO_CBM, &mut temp) {
@@ -453,20 +436,20 @@ impl<D: Device> Bus<D> {
         if size == 0 {
             let message = "Attempt to read 0 bytes".to_string();
             warn!("{message}");
-            return Err(Args { message });
+            return Err(Error::Args { message });
         }
 
         if let Some(pattern_len) = pattern_len {
             if pattern_len == 0 {
                 let message = "Attempt to read match against empty pattern".to_string();
                 warn!("{message}");
-                return Err(Args { message });
+                return Err(Error::Args { message });
             }
 
             if check_pattern_size && pattern_len > size {
                 let message = format!("Attempt to read match against pattern of larger {pattern_len} than requested read size {size}");
                 warn!("{message}");
-                return Err(Args { message });
+                return Err(Error::Args { message });
             }
         }
 
@@ -560,7 +543,7 @@ impl<D: Device> Bus<D> {
             .map(|_| ());
 
         if let Err(Error::Communication {
-            kind: CommunicationKind::StatusValue { value: _ },
+            kind: CommunicationError::StatusValue { value: _ },
         }) = result
         {
             // Note: 'result' needs to be the expression you're matching on
@@ -579,187 +562,18 @@ impl<D: Device> Bus<D> {
     }
 }
 
-impl Bus<UsbDevice> {
-    pub fn device_specific_info(&self) -> Option<&crate::usb::UsbInfo> {
-        self.device.specific_info()
-    }
-}
-
 /// A builder pattern for creating [`Bus`] instances with custom configuration.
-pub trait BusBuilder {
-    type Device: Device;
+pub trait BusBuilder
+where
+    Self: Sized,
+{
+    type D: Device;
 
-    fn new() -> Self;
-    fn build(&mut self) -> Result<Bus<Self::Device>, Error>;
-}
+    fn default() -> Self;
+    fn build(&mut self) -> Result<Bus<Self::D>, Error>;
+    fn device_config(&mut self, config: <Self::D as Device>::Config) -> &mut Self;
 
-/// A builder pattern for creating [`Bus`] instances using a UsbDevice and
-/// custom configuration.
-///
-/// Allows setting optional parameters like serial number, timeout, and USB context
-/// before creating the final [`Bus`] instance.
-///
-/// # Examples
-///
-/// ## A simple example
-///
-/// ```no_run
-/// use xum1541::{BusBuilder, UsbBusBuilder};
-///
-/// let bus = UsbBusBuilder::new()
-///     .build()
-///     .unwrap();
-/// ```
-///
-/// ## A more complex example
-///
-/// ```no_run
-/// use xum1541::{BusBuilder, UsbBusBuilder, DEFAULT_BUS_TIMEOUT};
-/// use std::time::Duration;
-///
-/// let bus = UsbBusBuilder::new()
-///     .serial_number(1)
-///     .timeout(DEFAULT_BUS_TIMEOUT)
-///     .build()
-///     .unwrap();
-/// ```
-pub struct UsbBusBuilder {
-    xum_serial_number: Option<u8>,
-    timeout: Option<Duration>,
-    context: Option<Context>,
-    device: Option<UsbDevice>,
-}
-
-impl BusBuilder for UsbBusBuilder {
-    type Device = UsbDevice;
-
-    /// Creates a new [`BusBuilder`] instance with default values.
-    ///
-    /// All fields are initialized to None and can be set using the builder methods.
-    ///
-    /// # Returns
-    /// * [`BusBuilder`] - new builder instance with default values
-    ///
-    /// # Example
-    /// See [`BusBuilder`] documentation
     fn new() -> Self {
-        UsbBusBuilder {
-            xum_serial_number: None,
-            timeout: None,
-            context: None,
-            device: None,
-        }
-    }
-
-    /// Builds and returns a new [`Bus`] instance using the configured parameters.
-    ///
-    /// # Returns
-    /// * `Ok(Bus)` - the constructed Bus instance if successful
-    /// * `Err(Error)` - if an error occurred during construction
-    ///
-    /// # Example
-    /// See [`BusBuilder`]
-    ///
-    /// # Notes:
-    /// * Uses default values for any parameters that weren't set:
-    ///   * serial_number: 0 (take first device found)
-    ///   * timeout: [`DEFAULT_BUS_TIMEOUT`]
-    ///   * context: new Context with LogLevel::Info
-    /// * Will create a new [`Device`] unless one was explicitly provided
-    fn build(&mut self) -> Result<Bus<UsbDevice>, Error> {
-        // Create the Device if necessary
-        let device = if self.device.is_none() {
-            self.create_device()?
-        } else {
-            self.device.take().unwrap()
-        };
-
-        // Create Bus
-        let timeout = self.timeout.unwrap_or(DEFAULT_BUS_TIMEOUT);
-        Ok(Bus::new(device, timeout))
-    }
-}
-
-impl UsbBusBuilder {
-    /// Sets the XUM-1541 device serial number to use.
-    ///
-    /// # Args:
-    /// * serial - the serial number to match when finding the device
-    ///
-    /// # Returns
-    /// * `&mut Self` - builder instance for method chaining
-    ///
-    /// # Note:
-    /// If not set, serial defaults to 0 when building
-    pub fn serial_number(&mut self, serial: u8) -> &mut Self {
-        self.xum_serial_number = Some(serial);
-        self
-    }
-
-    /// Sets the timeout duration for bus operations.
-    ///
-    /// # Args:
-    /// * duration - the period to use for the Bus timeout
-    ///
-    /// # Returns
-    /// * `&mut Self` - builder instance for method chaining
-    ///
-    /// # Note:
-    /// If not set, defaults to [`DEFAULT_BUS_TIMEOUT`] when building
-    pub fn timeout(&mut self, duration: Duration) -> &mut Self {
-        self.timeout = Some(duration);
-        self
-    }
-
-    /// Sets a custom USB context for device communication.
-    ///
-    /// This allows setting the USB debug log level via context.set_log_level()
-    /// using rusb::LogLevel.
-    ///
-    /// # Args:
-    /// * context - the [`rusb::Context`] to use
-    ///
-    /// # Returns
-    /// * `Self` - builder instance for method chaining
-    ///
-    /// ```rust,no_run
-    /// use rusb::{Context, UsbContext};
-    /// use xum1541::{BusBuilder, UsbBusBuilder};
-    ///
-    /// let mut context = Context::new().unwrap();
-    /// context.set_log_level(rusb::LogLevel::Debug);
-    ///
-    /// let bus = UsbBusBuilder::new()
-    ///     .context(context)
-    ///     .build()
-    ///     .unwrap();
-    /// ```
-    ///
-    /// # Note:
-    /// If not set, a new default [`rusb::Context`] will be created with LogLevel::Info
-    pub fn context(mut self, context: Context) -> Self {
-        self.context = Some(context);
-        self
-    }
-
-    /// Create the Device instance using the configured parameters
-    fn create_device(&mut self) -> Result<UsbDevice, Error> {
-        // Get or create the context
-        let context = if self.context.is_some() {
-            self.context.take().unwrap()
-        } else {
-            let mut context = rusb::Context::new()?;
-            context.set_log_level(rusb::LogLevel::Info);
-            context
-        };
-
-        // Create DeviceConfig
-        let config = UsbDeviceConfig {
-            context: Some(context),
-            serial_num: self.xum_serial_number,
-        };
-
-        // Create the Device
-        UsbDevice::new(Some(config))
+        Self::default()
     }
 }

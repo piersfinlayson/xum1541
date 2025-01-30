@@ -58,14 +58,14 @@
 //! use xum1541::{UsbBus, BusBuilder, UsbBusBuilder};
 //!
 //! let mut bus = UsbBusBuilder::new()
-//!     .serial_number(0)  // Use first available device
+//!     .device_serial_number(0)  // Use first available device
 //!     .build().unwrap();
 //!     
 //! bus.initialize().unwrap();
 //!
 //! // Or
 //!
-//! let bus = UsbBus::default().unwrap();
+//! let mut bus = UsbBus::default().unwrap();
 //! bus.initialize().unwrap();
 //! ```
 //!
@@ -235,20 +235,118 @@
 //! - Original [OpenCBM](https://github.com/OpenCbm/OpenCbm) project and xum1541 plugin developers.  OpenCbm is licensed under the GPLv2
 //! - ZoomFloppy hardware developers
 //! - Commodore community
+#[allow(unused_imports)]
+use log::{debug, error, info, trace, warn};
 
 pub mod bus;
 pub mod constants;
 pub mod device;
 pub mod error;
 
-pub use crate::bus::{Bus, BusBuilder, UsbBusBuilder, DEFAULT_BUS_TIMEOUT};
+pub use crate::error::Communication as CommunicationError;
+pub use crate::error::DeviceAccess as DeviceAccessError;
+/// Error types
+pub use crate::error::Error;
+pub use crate::error::Internal as InternalError;
 
-/// Use to create a Bus object via a USB-connected XUM1541 device
-pub type UsbBus = Bus<UsbDevice>;
-pub type RemoteUsbBus = Bus<RemoteUsbDevice>;
-pub use crate::bus::buscmd::DeviceChannel;
-pub use crate::constants::Ioctl;
-pub use crate::device::remoteusb::{RemoteUsbDevice, RemoteUsbDeviceConfig, UsbDeviceServer};
+/// Constants
+pub use crate::constants::{
+    Ioctl, DEVICE_MAX_NUM, DEVICE_MIN_NUM, DRIVE_MAX_CHANNEL, DRIVE_MIN_CHANNEL,
+};
+
+pub use crate::bus::remoteusb::{RemoteUsbBus, RemoteUsbBusBuilder};
+pub use crate::bus::usb::{UsbBus, UsbBusBuilder};
+pub use crate::bus::DEFAULT_TIMEOUT as BUS_DEFAULT_TIMEOUT;
+/// Bus types
+pub use crate::bus::{Bus, BusBuilder};
+
+pub use crate::device::remoteusb::{
+    RemoteUsbDevice, RemoteUsbDeviceConfig, RemoteUsbInfo, UsbDeviceServer,
+};
 pub use crate::device::usb::{UsbDevice, UsbDeviceConfig, UsbInfo};
-pub use crate::device::*;
-pub use crate::error::{CommunicationKind, DeviceAccessKind, Error};
+pub use crate::device::Config as DeviceConfig;
+/// Device types
+pub use crate::device::{Config, Device, DeviceDebugInfo, DeviceInfo, SpecificDeviceInfo};
+
+/// Struct holding device and channel numbers.  Used by [`crate::Bus`] functions
+/// which require the device and channel to be specified.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DeviceChannel {
+    device: u8,
+    channel: u8,
+}
+
+impl DeviceChannel {
+    /// Create a new DeviceChannel object
+    pub fn new(device: u8, channel: u8) -> Result<Self, Error> {
+        match Self::validate(device, channel) {
+            Ok(()) => Ok(Self { device, channel }),
+            Err(e) => Err(e),
+        }
+    }
+
+    // Returns the device number
+    pub const fn device(&self) -> u8 {
+        self.device
+    }
+
+    // Returns the channel number
+    pub const fn channel(&self) -> u8 {
+        self.channel
+    }
+
+    fn validate(device: u8, channel: u8) -> Result<(), Error> {
+        trace!("DeviceChannel::validate: device {device} and channel {channel}");
+
+        if device < DEVICE_MIN_NUM {
+            trace!("Device {device} below minimum {DEVICE_MIN_NUM}");
+            Err(Error::Args {
+                message: format!("Device number {device} is less than minimum {DEVICE_MIN_NUM}"),
+            })
+        } else if device > DEVICE_MAX_NUM {
+            trace!("Device {device} above maximum {DEVICE_MAX_NUM}");
+            Err(Error::Args {
+                message: format!("Device number {device} is greater than maximum {DEVICE_MAX_NUM}"),
+            })
+        } else if channel < DRIVE_MIN_CHANNEL {
+            trace!("Channel {channel} below minimum {DRIVE_MIN_CHANNEL}");
+            Err(Error::Args {
+                message: format!(
+                    "Channel number {channel} is less than minimum {DRIVE_MIN_CHANNEL}"
+                ),
+            })
+        } else if channel > DRIVE_MAX_CHANNEL {
+            trace!("Channel {channel} above maximum {DRIVE_MAX_CHANNEL}");
+            Err(Error::Args {
+                message: format!(
+                    "Channel number {channel} is greater than maximum {DRIVE_MAX_CHANNEL}"
+                ),
+            })
+        } else {
+            trace!("Validation successful for device {device} channel {channel}");
+            Ok(())
+        }
+    }
+
+    fn as_talk_bytes(&self) -> Vec<u8> {
+        vec![0x40 | self.device, 0x60 | self.channel]
+    }
+
+    fn as_listen_bytes(&self) -> Vec<u8> {
+        vec![0x20 | self.device, 0x60 | self.channel]
+    }
+
+    fn as_open_bytes(&self) -> Vec<u8> {
+        vec![0x20 | self.device, 0xf0 | self.channel]
+    }
+
+    fn as_close_bytes(&self) -> Vec<u8> {
+        vec![0x20 | self.device, 0xe0 | self.channel]
+    }
+}
+
+impl std::fmt::Display for DeviceChannel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Device: {} Channel: {}", self.device, self.channel)
+    }
+}

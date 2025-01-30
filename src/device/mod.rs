@@ -12,8 +12,10 @@ pub use usb::UsbDevice;
 use crate::constants::*;
 use crate::{Error, Ioctl};
 
+pub trait Config: std::fmt::Debug {}
+
 /// The core Device trait, which allows Device to be mocked out for testing
-pub trait Device {
+pub trait Device: std::fmt::Debug {
     type Config;
 
     /// Creates a new Device using the provided config, which can be
@@ -85,7 +87,7 @@ pub trait Device {
     /// [`Option<&DeviceInfo>`].
     ///
     /// May be None, in which case the Device has not been initialized
-    fn info(&self) -> Option<&DeviceInfo>;
+    fn info(&mut self) -> Option<&DeviceInfo>;
 
     /// Do a hard reset of the device, and reinitialize it afterwards.
     ///
@@ -113,7 +115,7 @@ pub trait Device {
     ///
     /// Note that the calling function must provide a large enough buffer for
     /// the response, or some bytes may not be read.
-    fn read_control(&self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize, Error>;
+    fn read_control(&mut self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize, Error>;
 
     /// Sends a control message and attempts to retrieve the status from the
     /// device.  It does not attempt to retrieve status if SHUTDOWN or RESET
@@ -127,7 +129,7 @@ pub trait Device {
     /// # Returns
     /// * `Ok()` - On success
     /// * `Err(Error)` - On failure
-    fn write_control(&self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Error>;
+    fn write_control(&mut self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Error>;
 
     /// Writes data to the device
     ///
@@ -135,13 +137,13 @@ pub trait Device {
     /// success, even if all the data could not be written.
     ///
     /// # Argumemts
-    /// * `mode` - Mode, one of xum1541::PROTO_*, see [`constants`]
+    /// * `mode` - Mode, one of xum1541::PROTO_*, see [`crate::constants`]
     /// * `data` - Data to write
     ///
     /// # Returns
     /// * `Ok(usize)` - On success, number of bytes written
     /// * `Err(Error>` - On failure
-    fn write_data(&self, mode: u8, data: &[u8]) -> Result<usize, Error>;
+    fn write_data(&mut self, mode: u8, data: &[u8]) -> Result<usize, Error>;
 
     /// Reads data from the device
     ///
@@ -156,7 +158,7 @@ pub trait Device {
     /// # Returns
     /// * `Ok(usize)` - On success, number of bytes written
     /// * `Err(Error>` - On failure
-    fn read_data(&self, mode: u8, buffer: &mut [u8]) -> Result<usize, Error>;
+    fn read_data(&mut self, mode: u8, buffer: &mut [u8]) -> Result<usize, Error>;
 
     /// Waits for status from the XUM1541 device, after certain commands and
     /// ioctls.
@@ -168,7 +170,7 @@ pub trait Device {
     /// # Returns
     /// `Ok(u16)` - the 2 byte status value from the device
     /// `Err(Error)` - the error on failure
-    fn wait_for_status(&self) -> Result<u16, Error>;
+    fn wait_for_status(&mut self) -> Result<u16, Error>;
 
     /// Sends an ioctl command to the device.  Reads status from the device
     /// after sending, except where the Ioctl is asyncronous
@@ -181,8 +183,12 @@ pub trait Device {
     /// # Returns
     /// * `Ok(Option<u16>)` - 2 byte status from the device, or None for an asyncronous ioctl, as this function does not wait after async ioctl
     /// * `Err(Error)` - On failure
-    fn ioctl(&self, ioctl: Ioctl, address: u8, secondary_address: u8)
-        -> Result<Option<u16>, Error>;
+    fn ioctl(
+        &mut self,
+        ioctl: Ioctl,
+        address: u8,
+        secondary_address: u8,
+    ) -> Result<Option<u16>, Error>;
 }
 
 /// DeviceInfo contains information read from the XUM1541 device.

@@ -1,96 +1,11 @@
 //! Bus state management objects and implementation
-use crate::constants::{
-    DRIVE_MAX_CHANNEL, DRIVE_MIN_CHANNEL, MAX_DEVICE_NUM, MIN_DEVICE_NUM, PROTO_CBM,
-    PROTO_WRITE_ATN, PROTO_WRITE_TALK,
-};
 
-use crate::Error;
+use crate::constants::{PROTO_CBM, PROTO_WRITE_ATN, PROTO_WRITE_TALK};
+use crate::DeviceChannel;
+
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
 use std::fmt;
-
-/// Struct holding device and channel numbers.  Used by [`crate::Bus`] functions
-/// which require the device and channel to be specified.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DeviceChannel {
-    device: u8,
-    channel: u8,
-}
-
-impl DeviceChannel {
-    /// Create a new DeviceChannel object
-    pub fn new(device: u8, channel: u8) -> Result<Self, Error> {
-        match Self::validate(device, channel) {
-            Ok(()) => Ok(Self { device, channel }),
-            Err(e) => Err(e),
-        }
-    }
-
-    // Returns the device number
-    pub const fn device(&self) -> u8 {
-        self.device
-    }
-
-    // Returns the channel number
-    pub const fn channel(&self) -> u8 {
-        self.channel
-    }
-
-    fn validate(device: u8, channel: u8) -> Result<(), Error> {
-        trace!("DeviceChannel::validate: device {device} and channel {channel}");
-
-        if device < MIN_DEVICE_NUM {
-            trace!("Device {device} below minimum {MIN_DEVICE_NUM}");
-            Err(Error::Args {
-                message: format!("Device number {device} is less than minimum {MIN_DEVICE_NUM}"),
-            })
-        } else if device > MAX_DEVICE_NUM {
-            trace!("Device {device} above maximum {MAX_DEVICE_NUM}");
-            Err(Error::Args {
-                message: format!("Device number {device} is greater than maximum {MAX_DEVICE_NUM}"),
-            })
-        } else if channel < DRIVE_MIN_CHANNEL {
-            trace!("Channel {channel} below minimum {DRIVE_MIN_CHANNEL}");
-            Err(Error::Args {
-                message: format!(
-                    "Channel number {channel} is less than minimum {DRIVE_MIN_CHANNEL}"
-                ),
-            })
-        } else if channel > DRIVE_MAX_CHANNEL {
-            trace!("Channel {channel} above maximum {DRIVE_MAX_CHANNEL}");
-            Err(Error::Args {
-                message: format!(
-                    "Channel number {channel} is greater than maximum {DRIVE_MAX_CHANNEL}"
-                ),
-            })
-        } else {
-            trace!("Validation successful for device {device} channel {channel}");
-            Ok(())
-        }
-    }
-
-    fn as_talk_bytes(&self) -> Vec<u8> {
-        vec![0x40 | self.device, 0x60 | self.channel]
-    }
-
-    fn as_listen_bytes(&self) -> Vec<u8> {
-        vec![0x20 | self.device, 0x60 | self.channel]
-    }
-
-    fn as_open_bytes(&self) -> Vec<u8> {
-        vec![0x20 | self.device, 0xf0 | self.channel]
-    }
-
-    fn as_close_bytes(&self) -> Vec<u8> {
-        vec![0x20 | self.device, 0xe0 | self.channel]
-    }
-}
-
-impl fmt::Display for DeviceChannel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Device: {} Channel: {}", self.device, self.channel)
-    }
-}
 
 /// The [`crate::Bus`] supports three modes:
 /// * [`BusMode::Talking`] - Drive with DeviceChannel has been told to talk

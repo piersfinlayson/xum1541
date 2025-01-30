@@ -12,7 +12,7 @@
 /// Note however that there are other reasons why the xum1541 may return
 /// a status value of 0x0000.  See OpenCbm/xum1541/iec.c, function
 /// iec_raw_write() for these cases.
-use xum1541::{BusBuilder, CommunicationKind, DeviceChannel, Error, UsbBusBuilder};
+use xum1541::{BusBuilder, CommunicationError, DeviceChannel, Error, UsbBusBuilder};
 mod common;
 use common::AppError;
 use env_logger;
@@ -62,7 +62,7 @@ fn main() -> Result<(), AppError> {
 
         match result {
             Err(Error::Communication {
-                kind: CommunicationKind::StatusValue { value: _ },
+                kind: CommunicationError::StatusValue { value: _ },
             }) => {
                 println!(
                     "Drive {drive} not detected via {mode} - check took {}ms",

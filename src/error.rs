@@ -7,7 +7,7 @@ use thiserror::Error;
 #[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
 pub enum Error {
     /// Errors accessing the USB device
-    /// Note that permission problems are explicitly handled in the DeviceAccessKind
+    /// Note that permission problems are explicitly handled in the DeviceAccess
     #[error("USB error while attempting to commuicate with the XUM1541: {0}")]
     Usb(SerializableUsbError),
 
@@ -17,7 +17,7 @@ pub enum Error {
 
     /// Failure in communicating with the XUM1541 device - may be transient
     #[error("XUM1541 device communication error: {kind}")]
-    Communication { kind: CommunicationKind },
+    Communication { kind: Communication },
 
     /// A USB operation timed out
     #[error("XUM1541 operation timed out after {dur:?}")]
@@ -25,7 +25,7 @@ pub enum Error {
 
     /// DeviceAccess holds a variety errors relating to accessing the XUM1541
     #[error("{kind}")]
-    DeviceAccess { kind: DeviceAccessKind },
+    DeviceAccess { kind: DeviceAccess },
 
     /// Invalid arguments passed to the xum1541 library
     #[error("xum1541 library called with invalid arguments: {message}")]
@@ -35,7 +35,7 @@ pub enum Error {
 /// Used to differentiate between different types of problems accessing the
 /// XUM1541 device
 #[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
-pub enum DeviceAccessKind {
+pub enum DeviceAccess {
     #[error("The library is not connected to an XUM1541")]
     NoDevice,
 
@@ -57,10 +57,16 @@ pub enum DeviceAccessKind {
 
     #[error("Hit USB permissions error while attempting to access XUM1541 device.  Are you sure you have suitable permissions?  You may need to reconfigure udev rules in /etc/udev/rules.d/.")]
     Permission,
+
+    #[error("Failed to resolve network address: {message}")]
+    AddressResolution { message: String, errno: i32 },
+
+    #[error("Failed to connect to remote device: {message}")]
+    NetworkConnection { message: String, errno: i32 },
 }
 
 #[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
-pub enum CommunicationKind {
+pub enum Communication {
     /// Hit a failure issuing an ioctl to the device
     #[error("Failed to issue ioctl to device")]
     IoctlFailed,
@@ -85,9 +91,17 @@ pub enum CommunicationKind {
     #[error("Timed out waiting for a status response from the device")]
     StatusTimeout { dur: std::time::Duration },
 
+    /// The remote end of the connection disconnected
+    #[error("Remote disconnected: {message} {errno}")]
+    RemoteDisconnected { message: String, errno: i32 },
+
     /// Hit an error talking to a remote
-    #[error("Hit an error communicating with a remote device: {0}")]
-    Remote(String),
+    #[error("Hit an error communicating with a remote device: {message}, {errno}")]
+    Remote { message: String, errno: i32 },
+
+    /// Hit an unknown communication error
+    #[error("Hit an unknown error during communication:  {message}, {errno}")]
+    Unknown { message: String, errno: i32 },
 }
 
 #[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
@@ -101,14 +115,21 @@ impl Error {
         match self {
             Error::Usb { .. } => EIO,
             Error::Init { .. } => EIO,
-            Error::Communication { .. } => EIO,
+            Error::Communication { kind } => match kind {
+                Communication::RemoteDisconnected { errno, .. } => *errno,
+                Communication::Remote { errno, .. } => *errno,
+                Communication::Unknown { errno, .. } => *errno,
+                _ => EIO,
+            },
             Error::Timeout { .. } => ETIMEDOUT,
             Error::DeviceAccess { kind } => match kind {
-                DeviceAccessKind::NoDevice { .. } => ENODEV,
-                DeviceAccessKind::NotFound { .. } => ENOENT,
-                DeviceAccessKind::SerialMismatch { .. } => ENOENT,
-                DeviceAccessKind::FirmwareVersion { .. } => ENODEV,
-                DeviceAccessKind::Permission { .. } => EACCES,
+                DeviceAccess::NoDevice { .. } => ENODEV,
+                DeviceAccess::NotFound { .. } => ENOENT,
+                DeviceAccess::SerialMismatch { .. } => ENOENT,
+                DeviceAccess::FirmwareVersion { .. } => ENODEV,
+                DeviceAccess::Permission { .. } => EACCES,
+                DeviceAccess::AddressResolution { errno, .. } => *errno,
+                DeviceAccess::NetworkConnection { errno, .. } => *errno,
             },
             Error::Args { .. } => EINVAL,
         }
@@ -121,7 +142,7 @@ impl Error {
 /// specific, handled, internal errors to deal with and we want to prevent them
 /// from escaping
 #[derive(Debug, Error, Serialize, Deserialize)]
-pub enum InternalError {
+pub enum Internal {
     #[error("Invalid device information: {message}")]
     DeviceInfo { message: String },
 
@@ -129,17 +150,17 @@ pub enum InternalError {
     PublicError { error: Error },
 }
 
-/// Map Error to an InternalError
-impl From<Error> for InternalError {
+/// Map Error to an Internal
+impl From<Error> for Internal {
     fn from(error: Error) -> Self {
-        InternalError::PublicError { error }
+        Internal::PublicError { error }
     }
 }
 
-/// Map rusb:Error to an Error, wrapped in an InternalError::PublicError type
-impl From<rusb::Error> for InternalError {
+/// Map rusb:Error to an Error, wrapped in an Internal::PublicError type
+impl From<rusb::Error> for Internal {
     fn from(error: rusb::Error) -> Self {
-        InternalError::PublicError {
+        Internal::PublicError {
             error: error.into(),
         }
     }
@@ -154,9 +175,9 @@ impl From<rusb::Error> for Error {
     }
 }
 
-// Map CommunicationKind to Error
-impl From<CommunicationKind> for Error {
-    fn from(kind: CommunicationKind) -> Self {
+// Map Communication to Error
+impl From<Communication> for Error {
+    fn from(kind: Communication) -> Self {
         Self::Communication { kind }
     }
 }

@@ -124,11 +124,11 @@ pub const CAP_TAP: u8 = 0x10; // 153x tape support
 /// Minimum (and default) Commodore disk drive device number.  Devices lower
 /// tha 8 are reserved for other device types, such as printers and tape
 /// drives, and  built in devices like keyboard and screen
-pub const MIN_DEVICE_NUM: u8 = 8;
+pub const DEVICE_MIN_NUM: u8 = 8;
 
 /// Maximum Commodore disk drive device number - derived from the maximum
 /// number which can be set, with software, on the 1571
-pub const MAX_DEVICE_NUM: u8 = 30;
+pub const DEVICE_MAX_NUM: u8 = 30;
 
 /// Minimum and maximum disk drive channel numbers
 

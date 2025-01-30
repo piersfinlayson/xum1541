@@ -25,7 +25,7 @@ on [`Bus::talk`] and [`Bus::Listen`] to infer the lack of a particular device.
 ### Added
 - Bus::get_eoi and Bus::clear_eoi functions
 - Removed BusCommand::trace_message
-- Xum1541Error::DeviceAccessKind::NoDevice, for other libaries to use when there is no Xum1541 connected to
+- Xum1541Error::DeviceAccess::NoDevice, for other libaries to use when there is no Xum1541 connected to
 - Added Xum1541Error::to_errno()
 - Add serde serialization and deserialization or error types
 
