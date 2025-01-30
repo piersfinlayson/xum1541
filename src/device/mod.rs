@@ -15,7 +15,7 @@ use crate::{Error, Ioctl};
 pub trait Config: std::fmt::Debug {}
 
 /// The core Device trait, which allows Device to be mocked out for testing
-pub trait Device: std::fmt::Debug {
+pub trait Device: std::fmt::Debug + Send + Clone {
     type Config;
 
     /// Creates a new Device using the provided config, which can be

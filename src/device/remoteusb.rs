@@ -17,10 +17,12 @@ use crate::{UsbDevice, UsbDeviceConfig};
 use bincode::{deserialize, serialize};
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::str::FromStr;
+use std::sync::Arc;
 
 pub const DEFAULT_PORT: u16 = 6767;
 pub const DEFAULT_ADDR: &str = "127.0.0.1";
@@ -234,9 +236,9 @@ impl std::fmt::Display for RemoteDeviceResponse {
 }
 
 // Client implementation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DeviceClient {
-    stream: Option<TcpStream>,
+    stream: Option<Arc<Mutex<TcpStream>>>,
     device_config: RemoteUsbDeviceConfig,
     device_info: DeviceInfo,
 }
@@ -256,7 +258,7 @@ impl DeviceClient {
             },
         })?;
         Ok(Self {
-            stream: Some(stream),
+            stream: Some(Arc::new(Mutex::new(stream))),
             device_config: RemoteUsbDeviceConfig {
                 serial_num: config.and_then(|c| c.serial_num),
                 remote_addr: Some(remote_addr),
@@ -265,9 +267,9 @@ impl DeviceClient {
         })
     }
 
-    fn stream_or_err(&mut self) -> Result<&TcpStream, Error> {
+    fn stream_or_err(&mut self) -> Result<Arc<Mutex<TcpStream>>, Error> {
         match &self.stream {
-            Some(stream) => Ok(stream),
+            Some(stream) => Ok(stream.clone()),
             None => Err(Error::DeviceAccess {
                 kind: DeviceAccessError::NetworkConnection {
                     message: "Stream not initialized".to_string(),
@@ -281,7 +283,7 @@ impl DeviceClient {
         &mut self,
         request: RemoteDeviceRequest,
     ) -> Result<RemoteDeviceResponse, Error> {
-        let mut stream = self.stream_or_err()?;
+        let stream = self.stream_or_err()?;
 
         let data = serialize(&request).map_err(|e| Error::DeviceAccess {
             kind: DeviceAccessError::NetworkConnection {
@@ -290,46 +292,52 @@ impl DeviceClient {
             },
         })?;
 
-        // Send length prefix
-        stream
-            .write_all(&(data.len() as u64).to_le_bytes())
-            .map_err(|e| Error::DeviceAccess {
+        let response_data = {
+            let mut guard = stream.lock();
+
+            // Send length prefix
+            guard
+                .write_all(&(data.len() as u64).to_le_bytes())
+                .map_err(|e| Error::DeviceAccess {
+                    kind: DeviceAccessError::NetworkConnection {
+                        message: format!("Failed to send message length: {}", e),
+                        errno: e.raw_os_error().unwrap_or(libc::EIO),
+                    },
+                })?;
+
+            // Send data
+            guard.write_all(&data).map_err(|e| Error::DeviceAccess {
                 kind: DeviceAccessError::NetworkConnection {
-                    message: format!("Failed to send message length: {}", e),
+                    message: format!("Failed to send message: {}", e),
                     errno: e.raw_os_error().unwrap_or(libc::EIO),
                 },
             })?;
 
-        // Send data
-        stream.write_all(&data).map_err(|e| Error::DeviceAccess {
-            kind: DeviceAccessError::NetworkConnection {
-                message: format!("Failed to send message: {}", e),
-                errno: e.raw_os_error().unwrap_or(libc::EIO),
-            },
-        })?;
+            // Read response length
+            let mut len_buf = [0u8; 8];
+            guard
+                .read_exact(&mut len_buf)
+                .map_err(|e| Error::DeviceAccess {
+                    kind: DeviceAccessError::NetworkConnection {
+                        message: format!("Failed to read response length: {}", e),
+                        errno: e.raw_os_error().unwrap_or(libc::EIO),
+                    },
+                })?;
+            let len = u64::from_le_bytes(len_buf) as usize;
 
-        // Read response length
-        let mut len_buf = [0u8; 8];
-        stream
-            .read_exact(&mut len_buf)
-            .map_err(|e| Error::DeviceAccess {
-                kind: DeviceAccessError::NetworkConnection {
-                    message: format!("Failed to read response length: {}", e),
-                    errno: e.raw_os_error().unwrap_or(libc::EIO),
-                },
-            })?;
-        let len = u64::from_le_bytes(len_buf) as usize;
+            // Read response data
+            let mut response_data = vec![0u8; len];
+            guard
+                .read_exact(&mut response_data)
+                .map_err(|e| Error::DeviceAccess {
+                    kind: DeviceAccessError::NetworkConnection {
+                        message: format!("Failed to read response: {}", e),
+                        errno: e.raw_os_error().unwrap_or(libc::EIO),
+                    },
+                })?;
 
-        // Read response data
-        let mut response_data = vec![0u8; len];
-        stream
-            .read_exact(&mut response_data)
-            .map_err(|e| Error::DeviceAccess {
-                kind: DeviceAccessError::NetworkConnection {
-                    message: format!("Failed to read response: {}", e),
-                    errno: e.raw_os_error().unwrap_or(libc::EIO),
-                },
-            })?;
+            response_data
+        };
 
         deserialize(&response_data).map_err(|e| Error::DeviceAccess {
             kind: DeviceAccessError::NetworkConnection {

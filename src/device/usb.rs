@@ -11,11 +11,13 @@ use crate::{Device, DeviceDebugInfo, DeviceInfo, SpecificDeviceInfo};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
+use parking_lot::Mutex;
 use rusb::Device as RusbDevice;
 use rusb::DeviceHandle as RusbDeviceHandle;
 use rusb::{constants, Context, DeviceDescriptor, UsbContext};
 use std::cmp::min;
 use std::str::from_utf8;
+use std::sync::Arc;
 use std::thread::sleep;
 
 /// Device represents the physical XUM1541 USB adapter.
@@ -28,15 +30,15 @@ use std::thread::sleep;
 /// to use [`crate::BusBuilder::build`], which will create both the Bus object, and at the
 /// same time the Device object.  You can configure the Device object via
 /// [`crate::BusBuilder`] if needed.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UsbDevice {
-    handle: RusbDeviceHandle<Context>,
+    handle: Arc<Mutex<RusbDeviceHandle<Context>>>,
     config: UsbDeviceConfig,
     info: Option<DeviceInfo>,
     usb_info: Option<UsbInfo>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UsbDeviceConfig {
     /// The [`rusb::Context`] to use for this device.  May be None to use
     /// default context.
@@ -57,7 +59,7 @@ impl Default for UsbDeviceConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UsbInfo {
     pub vendor_id: u16,
     pub product_id: u16,
@@ -122,7 +124,7 @@ impl Device for UsbDevice {
 
         // Return Self
         Ok(Self {
-            handle,
+            handle: Arc::new(Mutex::new(handle)),
             config,
             info: None,
             usb_info: None,
@@ -171,16 +173,19 @@ impl Device for UsbDevice {
 
         // Perform control transfer and return number of bytes read
         let index = 0; // default control endpoint
-        self.handle
-            .read_control(
-                REQUEST_TYPE,
-                request,
-                value,
-                index,
-                buffer,
-                DEFAULT_CONTROL_TIMEOUT,
-            )
-            .map_err(|e| e.into())
+        {
+            self.handle
+                .lock()
+                .read_control(
+                    REQUEST_TYPE,
+                    request,
+                    value,
+                    index,
+                    buffer,
+                    DEFAULT_CONTROL_TIMEOUT,
+                )
+                .map_err(|e| e.into())
+        }
     }
 
     fn write_control(&mut self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Error> {
@@ -194,14 +199,16 @@ impl Device for UsbDevice {
 
         // Send control transfer
         let index = 0; // default control endpoint
-        self.handle.write_control(
-            REQUEST_TYPE,
-            request,
-            value,
-            index,
-            buffer,
-            DEFAULT_CONTROL_TIMEOUT,
-        )?;
+        {
+            self.handle.lock().write_control(
+                REQUEST_TYPE,
+                request,
+                value,
+                index,
+                buffer,
+                DEFAULT_CONTROL_TIMEOUT,
+            )?;
+        }
 
         // Device doesn't seem to want to respond to use if we've shut it
         // down or called reset
@@ -236,8 +243,11 @@ impl Device for UsbDevice {
         // Send the write command with 4-byte command buffer
         let cmd_buf = [WRITE, mode, (size & 0xff) as u8, ((size >> 8) & 0xff) as u8];
 
-        self.handle
-            .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)?;
+        {
+            self.handle
+                .lock()
+                .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)?;
+        }
 
         // Write the actual data in chunks
         let mut bytes_written = 0;
@@ -247,9 +257,11 @@ impl Device for UsbDevice {
             let chunk_size = min(MAX_XFER_SIZE, size - bytes_written);
             let chunk = &data_slice[..chunk_size];
 
-            let written =
+            let written = {
                 self.handle
-                    .write_bulk(BULK_OUT_ENDPOINT, chunk, DEFAULT_WRITE_TIMEOUT)?;
+                    .lock()
+                    .write_bulk(BULK_OUT_ENDPOINT, chunk, DEFAULT_WRITE_TIMEOUT)?
+            };
 
             // If we wrote less than requested, we're done
             if written < chunk_size {
@@ -300,8 +312,11 @@ impl Device for UsbDevice {
         // Send read command with 4-byte command buffer
         let cmd_buf = [READ, mode, (size & 0xff) as u8, ((size >> 8) & 0xff) as u8];
 
-        self.handle
-            .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)?;
+        {
+            self.handle
+                .lock()
+                .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)?;
+        }
 
         // Read data in chunks
         let mut bytes_read = 0;
@@ -309,9 +324,11 @@ impl Device for UsbDevice {
             let chunk_size = std::cmp::min(MAX_XFER_SIZE, size - bytes_read);
             let chunk = &mut buffer.as_mut()[bytes_read..bytes_read + chunk_size];
 
-            let read = self
-                .handle
-                .read_bulk(BULK_IN_ENDPOINT, chunk, DEFAULT_READ_TIMEOUT)?;
+            let read = {
+                self.handle
+                    .lock()
+                    .read_bulk(BULK_IN_ENDPOINT, chunk, DEFAULT_READ_TIMEOUT)?
+            };
 
             bytes_read += read;
 
@@ -332,10 +349,14 @@ impl Device for UsbDevice {
         let mut timeouts = 0;
         loop {
             trace!("Read bulk endpoint 0x{:02x}", BULK_IN_ENDPOINT);
-            match self
-                .handle
-                .read_bulk(BULK_IN_ENDPOINT, &mut status_buf, DEFAULT_READ_TIMEOUT)
-            {
+            let result = {
+                self.handle.lock().read_bulk(
+                    BULK_IN_ENDPOINT,
+                    &mut status_buf,
+                    DEFAULT_READ_TIMEOUT,
+                )
+            };
+            match result {
                 // The XUM1541 status response continues of 3 bytes
                 // The 1st byte is the status of the response - which can be
                 // * IO_READY
@@ -423,10 +444,12 @@ impl Device for UsbDevice {
         let cmd_buf = [ioctl as u8, address, secondary_address, 0u8];
 
         // Send command
-        match self
-            .handle
-            .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)
-        {
+        let result = {
+            self.handle
+                .lock()
+                .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)
+        };
+        match result {
             Ok(_) => {
                 trace!(
                     "Successfully sent ioctl {ioctl} to address {address} secondary_address {secondary_address}",
@@ -528,7 +551,9 @@ impl UsbDevice {
     fn hard_reset_pre_init(&self) -> Result<(), Error> {
         trace!("Device::hard_reset_pre_init");
         debug!("Hard reset the device");
-        self.handle.reset()?;
+        {
+            self.handle.lock().reset()?;
+        }
         sleep(DEFAULT_USB_RESET_SLEEP);
         trace!("Reset should be commplete, continue");
         Ok(())
@@ -583,7 +608,8 @@ impl UsbDevice {
     fn clear_halt(&self) -> Result<(), Error> {
         trace!("Device::clear_halt");
 
-        match self.handle.clear_halt(BULK_IN_ENDPOINT) {
+        let result = { self.handle.lock().clear_halt(BULK_IN_ENDPOINT) };
+        match result {
             Ok(_) => (),
             Err(e) => {
                 warn!("USB clear halt request failed for in endpoint: {}", e);
@@ -591,7 +617,8 @@ impl UsbDevice {
             }
         }
 
-        match self.handle.clear_halt(BULK_OUT_ENDPOINT) {
+        let result = { self.handle.lock().clear_halt(BULK_OUT_ENDPOINT) };
+        match result {
             Ok(_) => Ok(()),
             Err(e) => {
                 warn!("USB clear halt request failed for out endpoint: {}", e);
@@ -614,20 +641,32 @@ impl UsbDevice {
 
     /// Verify device identity and set up initial configuration
     fn verify_and_setup_device(&mut self) -> Result<(DeviceInfo, UsbInfo), Error> {
+        // TO DO - this function is a bit of a mess.  Would prob be better
+        // to default() the structs we need up front as mut and then add to
+        // as we go through, rather than pass info we want back from locking
+        // scopes.
+
         trace!("Device::verify_and_setup_device");
-        let device = self.handle.device();
-        let device_desc = device.device_descriptor()?;
+        let (device_desc, bus_number, address) = {
+            let guard = self.handle.lock();
+
+            let device = guard.device();
+            (
+                device.device_descriptor()?,
+                device.bus_number(),
+                device.address(),
+            )
+        };
 
         // Read device strings
         let product = self.read_product_string(&device_desc)?;
-        let manufacturer = self
-            .handle
-            .read_manufacturer_string_ascii(&device_desc)
-            .ok();
-        let serial_number = self
-            .handle
-            .read_serial_number_string_ascii(&device_desc)
-            .ok();
+
+        let (manufacturer, serial_number) = {
+            let guard = self.handle.lock();
+            let manufacturer = guard.read_manufacturer_string_ascii(&device_desc).ok();
+            let serial_number = guard.read_serial_number_string_ascii(&device_desc).ok();
+            (manufacturer, serial_number)
+        };
 
         // Verify product string
         debug!("Product string: {}", product);
@@ -637,10 +676,6 @@ impl UsbDevice {
             });
         }
 
-        // Configure device
-        self.setup_device_configuration()?;
-
-        // Set up device info
         let device_info = DeviceInfo {
             product,
             manufacturer,
@@ -655,9 +690,14 @@ impl UsbDevice {
         let usb_info = UsbInfo {
             vendor_id: device_desc.vendor_id(),
             product_id: device_desc.product_id(),
-            bus_number: device.bus_number(),
-            device_address: device.address(),
+            bus_number: bus_number,
+            device_address: address,
         };
+
+        // Configure device
+        self.setup_device_configuration()?;
+
+        // Set up device info
 
         Ok((device_info, usb_info))
     }
@@ -666,6 +706,7 @@ impl UsbDevice {
     fn read_product_string(&self, device_desc: &DeviceDescriptor) -> Result<String, Error> {
         trace!("Device::read_product_string device_desc {device_desc:?}");
         self.handle
+            .lock()
             .read_product_string_ascii(device_desc)
             .map_err(|_| Error::Init {
                 message: "Couldn't read device product string".into(),
@@ -675,15 +716,19 @@ impl UsbDevice {
     /// Set up device configuration and claim interface
     fn setup_device_configuration(&mut self) -> Result<(), Error> {
         trace!("Device::setup_device_configuration");
-        let config = self.handle.active_configuration()?;
-        debug!("Current configuration is {}", config);
-        if config != 1 {
-            debug!("Set active configuration to 1");
-            self.handle.set_active_configuration(1)?;
+        {
+            let guard = self.handle.lock();
+
+            let config = guard.active_configuration()?;
+            debug!("Current configuration is {}", config);
+            if config != 1 {
+                debug!("Set active configuration to 1");
+                guard.set_active_configuration(1)?;
+            }
         }
 
         debug!("Claim interface");
-        self.handle.claim_interface(0)?;
+        self.handle.lock().claim_interface(0)?;
         Ok(())
     }
 
@@ -820,7 +865,7 @@ impl Drop for UsbDevice {
         let _ = self.write_control(CTRL_SHUTDOWN, 0, &[]);
 
         // Release interface - again ignoring errors
-        let _ = self.handle.release_interface(0);
+        let _ = self.handle.lock().release_interface(0);
         trace!("Exited drop");
     }
 }
