@@ -598,7 +598,7 @@ impl UsbDeviceServer {
                         // Send a shutdown message to the xum1541 to cleanly
                         // shut it down
                         if let Err(e) = self.device.write_control(CTRL_SHUTDOWN, 0, &[]) {
-                            warn!("Failed to cleanly shutodwn trace on Disconne error information:: {e}");
+                            warn!("Failed to cleanly shutdown device on client disconnect - error information:: {e}");
                         }
                         return Err(Error::Communication {
                             kind: CommunicationError::RemoteDisconnected {
