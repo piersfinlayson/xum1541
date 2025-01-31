@@ -49,7 +49,7 @@ use std::time::Duration;
 ///
 /// // Builds a remotely attached device
 /// let bus = BusBuilder::new()
-///     .remote_str("127.0.0.1:6767").unwrap()
+///     .remote_str("127.0.0.1:1541").unwrap()
 ///     .build().unwrap();
 /// ```
 pub struct BusBuilder {
