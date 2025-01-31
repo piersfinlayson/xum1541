@@ -25,7 +25,7 @@ use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::str::FromStr;
 use std::sync::Arc;
 
-pub const DEFAULT_PORT: u16 = 1541; 
+pub const DEFAULT_PORT: u16 = 1541;
 pub const DEFAULT_ADDR: &str = "127.0.0.1";
 fn default_socket_addr() -> SocketAddr {
     SocketAddr::new(IpAddr::from_str(DEFAULT_ADDR).unwrap(), DEFAULT_PORT)

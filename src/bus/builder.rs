@@ -95,14 +95,14 @@ impl BusBuilder {
     /// # Notes:
     /// Uses default values for any parameters that weren't set
     pub fn build(&mut self) -> Result<Bus, Error> {
-        let device = match self.usb_context {
+        let device = match self.remote_addr {
             Some(_) => {
-                trace!("Creating local USB device");
-                self.create_usb_device()
-            }
-            None => {
                 trace!("Creating remote USB device");
                 self.create_remote_device()
+            }
+            None => {
+                trace!("Creating local USB device");
+                self.create_usb_device()
             }
         }?;
 
