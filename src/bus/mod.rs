@@ -1,19 +1,21 @@
 //! [`Bus`] is the main interface for accessing Commodore disk drives and the IEC/IEEE-488 bus via the XUM1541.  Its use it preferred over direct use of [`Device`].
 use crate::constants::{CTRL_RESET, PROTO_CBM};
+use crate::device::SwDebugInfo;
 #[allow(unused_imports)]
 use crate::DeviceChannel;
-use crate::Ioctl;
 use crate::{CommunicationError, Error};
-use crate::{Device, DeviceInfo};
+use crate::{DeviceInfo, DeviceType};
+use crate::{Ioctl, RemoteUsbInfo, UsbInfo};
 use cmd::{BusCommand, BusMode};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
 use std::time::Duration;
 
+pub mod builder;
 pub mod cmd;
-pub mod remoteusb;
-pub mod usb;
+
+pub use builder::BusBuilder;
 
 /// Default Bus timeout - currently unused, but may be passed to [`Bus::new`]
 /// and [`crate::UsbBusBuilder::timeout`]
@@ -35,15 +37,18 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 ///
 /// Use [`BusBuilder`] to create a new [`Bus`] (and [`Device`]) instance.
 #[derive(Debug)]
-pub struct Bus<D> {
-    device: D,
+pub struct Bus {
+    device: DeviceType,
     _timeout: Duration,
     mode: BusMode,
 }
 
 /// Public [`Bus`] functions
-impl<D: Device> Bus<D> {
+impl Bus {
     /// Creates a new bus instance. Use if you have manually created a [`Device`] instance.
+    ///
+    /// Using [`BusBuilder`] is strongly preferred over using this method
+    /// directly
     ///
     /// # Args:
     /// * device: - the device to use for communication
@@ -56,13 +61,14 @@ impl<D: Device> Bus<D> {
     ///
     /// # Example
     /// ```no_run
-    /// use xum1541::{Bus, Device, UsbDevice, BUS_DEFAULT_TIMEOUT};
-    /// let device = UsbDevice::new(None).unwrap();  // serial_num = None to auto select device
+    /// use xum1541::{Bus, DeviceType, DeviceConfig, UsbDeviceConfig, BUS_DEFAULT_TIMEOUT};
+    /// let usb_config = UsbDeviceConfig::default();
+    /// let device = DeviceType::new(DeviceConfig::Usb(usb_config)).unwrap();
     /// let mut bus = Bus::new(device, BUS_DEFAULT_TIMEOUT);
     /// // Now initialize both the Bus and Device simultaneously
     /// bus.initialize();
     /// ```
-    pub fn new(device: D, timeout: Duration) -> Self {
+    pub fn new(device: DeviceType, timeout: Duration) -> Self {
         trace!("Bus::new");
         Bus {
             device,
@@ -366,8 +372,20 @@ impl<D: Device> Bus<D> {
     ///
     /// # Returns
     /// * `Option<&DeviceInfo>` - device information if available
-    pub fn device_info(&mut self) -> Option<&DeviceInfo> {
+    pub fn device_info(&mut self) -> Option<DeviceInfo> {
         self.device.info()
+    }
+
+    pub fn usb_device_info(&mut self) -> Option<UsbInfo> {
+        self.device.usb_info()
+    }
+
+    pub fn remote_usb_device_info(&mut self) -> Option<RemoteUsbInfo> {
+        self.device.remote_usb_info()
+    }
+
+    pub fn device_sw_debug_info(&mut self) -> SwDebugInfo {
+        self.device.sw_debug_info()
     }
 
     /// Check if the bus is in listening mode.
@@ -394,7 +412,7 @@ impl<D: Device> Bus<D> {
 }
 
 /// Private functions for Bus
-impl<D: Device> Bus<D> {
+impl Bus {
     /// Read a single byte from the bus.
     ///
     /// # Returns
@@ -559,21 +577,5 @@ impl<D: Device> Bus<D> {
             }
         }
         result
-    }
-}
-
-/// A builder pattern for creating [`Bus`] instances with custom configuration.
-pub trait BusBuilder
-where
-    Self: Sized,
-{
-    type D: Device;
-
-    fn default() -> Self;
-    fn build(&mut self) -> Result<Bus<Self::D>, Error>;
-    fn device_config(&mut self, config: <Self::D as Device>::Config) -> &mut Self;
-
-    fn new() -> Self {
-        Self::default()
     }
 }

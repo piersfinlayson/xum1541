@@ -5,6 +5,7 @@ use crate::constants::{
     IO_ERROR, IO_READY, MAX_XFER_SIZE, MIN_FW_VERSION, PROTO_CBM, PROTO_MASK, READ,
     STATUS_BUF_SIZE, STATUS_DOING_RESET, WRITE, XUM1541_PID, XUM1541_VID,
 };
+use crate::device::SwDebugInfo;
 use crate::Ioctl;
 use crate::{CommunicationError, DeviceAccessError, Error, InternalError};
 use crate::{Device, DeviceDebugInfo, DeviceInfo, SpecificDeviceInfo};
@@ -15,6 +16,7 @@ use parking_lot::Mutex;
 use rusb::Device as RusbDevice;
 use rusb::DeviceHandle as RusbDeviceHandle;
 use rusb::{constants, Context, DeviceDescriptor, UsbContext};
+use serde::{Deserialize, Serialize};
 use std::cmp::min;
 use std::str::from_utf8;
 use std::sync::Arc;
@@ -33,9 +35,9 @@ use std::thread::sleep;
 #[derive(Debug, Clone)]
 pub struct UsbDevice {
     handle: Arc<Mutex<RusbDeviceHandle<Context>>>,
-    config: UsbDeviceConfig,
     info: Option<DeviceInfo>,
     usb_info: Option<UsbInfo>,
+    sw_debug_info: SwDebugInfo,
 }
 
 #[derive(Debug, Clone)]
@@ -59,7 +61,7 @@ impl Default for UsbDeviceConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsbInfo {
     pub vendor_id: u16,
     pub product_id: u16,
@@ -67,43 +69,32 @@ pub struct UsbInfo {
     pub device_address: u8,
 }
 
-impl SpecificDeviceInfo for UsbDevice {
+impl SpecificDeviceInfo for UsbInfo {
     type Info = UsbInfo;
 
-    fn specific_info(&self) -> Option<&Self::Info> {
-        if let Some(info) = &self.usb_info {
-            Some(&info)
-        } else {
-            None
-        }
-    }
-
-    fn print_specific(&self) {
-        if let Some(info) = self.specific_info() {
-            println!("  - device: {:04x}:{:04x}", info.vendor_id, info.product_id);
-            println!(
-                "  - bus/address: {:03}-{:03}",
-                info.bus_number, info.device_address
-            );
-        } else {
-            println!("  - no USB device information");
-        }
+    fn print(&self) {
+        println!("  - device: {:04x}:{:04x}", self.vendor_id, self.product_id);
+        println!(
+            "  - bus/address: {:03}-{:03}",
+            self.bus_number, self.device_address
+        );
     }
 }
 
 /// Public Device functions
 impl Device for UsbDevice {
     type Config = UsbDeviceConfig;
+    type SpecificDeviceInfo = UsbInfo;
 
     fn new(config: Option<Self::Config>) -> Result<Self, Error> {
-        trace!("Device::new");
+        trace!("UsbDevice::new");
 
         // Set up a config object if we don't already have one
         let mut config = if let Some(config) = config {
-            trace!("Device::new config {:?}", config);
+            trace!("UsbDevice::new config {:?}", config);
             config
         } else {
-            trace!("Device::new default config");
+            trace!("UsbDevice::new default config");
             UsbDeviceConfig {
                 context: None,
                 serial_num: None,
@@ -125,32 +116,39 @@ impl Device for UsbDevice {
         // Return Self
         Ok(Self {
             handle: Arc::new(Mutex::new(handle)),
-            config,
             info: None,
             usb_info: None,
+            sw_debug_info: SwDebugInfo::default(),
         })
     }
 
-    fn current_config(&self) -> Option<&Self::Config> {
-        trace!("Device::current_config");
-        Some(&self.config)
-    }
-
     fn init(&mut self) -> Result<(), Error> {
-        trace!("Device::init");
+        trace!("UsbDevice::init");
+        self.sw_debug_info.increment_api_call();
         let (info, usb_info) = self.initialize_device()?;
         self.info = Some(info);
         self.usb_info = Some(usb_info);
         Ok(())
     }
 
-    fn info(&mut self) -> Option<&DeviceInfo> {
-        trace!("Device::info");
-        self.info.as_ref()
+    fn info(&mut self) -> Option<DeviceInfo> {
+        trace!("UsbDevice::info");
+        self.info.clone()
+    }
+
+    fn specific_info(&mut self) -> Option<Self::SpecificDeviceInfo> {
+        trace!("UsbDevice::specific_info");
+        self.usb_info.clone()
+    }
+
+    fn sw_debug_info(&mut self) -> SwDebugInfo {
+        trace!("UsbDevice::sw_debug_info");
+        self.sw_debug_info.clone()
     }
 
     fn hard_reset_and_re_init(&mut self) -> Result<(), Error> {
-        trace!("Device::hard_reset_and_re_init");
+        trace!("UsbDevice::hard_reset_and_re_init");
+        self.sw_debug_info.increment_api_call();
         // Drop the info - this will be reinitialized shortly
         // Resetting the device doesn't require this
         self.info = None;
@@ -165,6 +163,7 @@ impl Device for UsbDevice {
             "Device::read_control request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
         );
+        self.sw_debug_info.increment_api_call();
 
         // Class-specific request, device as recipient, with IN direction
         const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
@@ -193,6 +192,7 @@ impl Device for UsbDevice {
             "Device::write_control request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
         );
+        self.sw_debug_info.increment_api_call();
         const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
             | constants::LIBUSB_RECIPIENT_ENDPOINT
             | constants::LIBUSB_ENDPOINT_OUT;
@@ -229,7 +229,8 @@ impl Device for UsbDevice {
 
     fn write_data(&mut self, mode: u8, data: &[u8]) -> Result<usize, Error> {
         let size = data.len();
-        trace!("Device::write_data mode b{mode:08b} data.len() {size}");
+        trace!("UsbDevice::write_data mode b{mode:08b} data.len() {size}");
+        self.sw_debug_info.increment_api_call();
 
         // Validate inputs
         if size > MAX_XFER_SIZE {
@@ -292,7 +293,8 @@ impl Device for UsbDevice {
 
     fn read_data(&mut self, mode: u8, buffer: &mut [u8]) -> Result<usize, Error> {
         let size = buffer.len();
-        trace!("Device::read_data mode b{mode:08b} buffer.len() {size}");
+        trace!("UsbDevice::read_data mode b{mode:08b} buffer.len() {size}");
+        self.sw_debug_info.increment_api_call();
 
         // Check inputs
         if size > MAX_XFER_SIZE {
@@ -343,7 +345,8 @@ impl Device for UsbDevice {
     }
 
     fn wait_for_status(&mut self) -> Result<u16, Error> {
-        trace!("Device::wait_for_status");
+        trace!("UsbDevice::wait_for_status");
+        self.sw_debug_info.increment_api_call();
 
         let mut status_buf = vec![0u8; STATUS_BUF_SIZE];
         let mut timeouts = 0;
@@ -438,7 +441,8 @@ impl Device for UsbDevice {
         address: u8,
         secondary_address: u8,
     ) -> Result<Option<u16>, Error> {
-        trace!("Device::ioctl {ioctl} address {address} secondary_address {secondary_address}");
+        trace!("UsbDevice::ioctl {ioctl} address {address} secondary_address {secondary_address}");
+        self.sw_debug_info.increment_api_call();
 
         // Build 4-byte command buffer
         let cmd_buf = [ioctl as u8, address, secondary_address, 0u8];
@@ -478,7 +482,7 @@ impl UsbDevice {
         context: &Context,
         serial_num: Option<u8>,
     ) -> Result<(RusbDevice<Context>, RusbDeviceHandle<Context>), Error> {
-        trace!("Device::find_device context {context:?} serial_num {serial_num:?}");
+        trace!("UsbDevice::find_device context {context:?} serial_num {serial_num:?}");
 
         let mut found_serial_nums = vec![];
         let serial_num = serial_num.unwrap_or(0);
@@ -549,7 +553,7 @@ impl UsbDevice {
     // deliberately made a non-public function to avoid external parties
     // accidently resetting and then not re-initializing
     fn hard_reset_pre_init(&self) -> Result<(), Error> {
-        trace!("Device::hard_reset_pre_init");
+        trace!("UsbDevice::hard_reset_pre_init");
         debug!("Hard reset the device");
         {
             self.handle.lock().reset()?;
@@ -561,7 +565,7 @@ impl UsbDevice {
 
     /// Initialize device and get info
     fn initialize_device(&mut self) -> Result<(DeviceInfo, UsbInfo), Error> {
-        trace!("Device::initialize_device");
+        trace!("UsbDevice::initialize_device");
 
         // Hard reset the device
         // This fixes a multitude of problems - including
@@ -606,7 +610,7 @@ impl UsbDevice {
     }
 
     fn clear_halt(&self) -> Result<(), Error> {
-        trace!("Device::clear_halt");
+        trace!("UsbDevice::clear_halt");
 
         let result = { self.handle.lock().clear_halt(BULK_IN_ENDPOINT) };
         match result {
@@ -628,13 +632,13 @@ impl UsbDevice {
     }
 
     fn get_status(buf: &[u8]) -> u8 {
-        trace!("Device::get_status buf.len() {}", buf.len());
+        trace!("UsbDevice::get_status buf.len() {}", buf.len());
         assert!(buf.len() >= 1);
         buf[0]
     }
 
     fn get_status_val(buf: &[u8]) -> u16 {
-        trace!("Device::get_status_val buf.len() {}", buf.len());
+        trace!("UsbDevice::get_status_val buf.len() {}", buf.len());
         assert!(buf.len() >= 3);
         u16::from(buf[2]) << 8 | u16::from(buf[1])
     }
@@ -646,7 +650,7 @@ impl UsbDevice {
         // as we go through, rather than pass info we want back from locking
         // scopes.
 
-        trace!("Device::verify_and_setup_device");
+        trace!("UsbDevice::verify_and_setup_device");
         let (device_desc, bus_number, address) = {
             let guard = self.handle.lock();
 
@@ -704,7 +708,7 @@ impl UsbDevice {
 
     /// Read product string with error handling
     fn read_product_string(&self, device_desc: &DeviceDescriptor) -> Result<String, Error> {
-        trace!("Device::read_product_string device_desc {device_desc:?}");
+        trace!("UsbDevice::read_product_string device_desc {device_desc:?}");
         self.handle
             .lock()
             .read_product_string_ascii(device_desc)
@@ -715,7 +719,7 @@ impl UsbDevice {
 
     /// Set up device configuration and claim interface
     fn setup_device_configuration(&mut self) -> Result<(), Error> {
-        trace!("Device::setup_device_configuration");
+        trace!("UsbDevice::setup_device_configuration");
         {
             let guard = self.handle.lock();
 
@@ -734,7 +738,7 @@ impl UsbDevice {
 
     /// Read basic device information
     fn read_basic_info(&mut self, initial_info: &DeviceInfo) -> Result<DeviceInfo, Error> {
-        trace!("Device::read_basic_info initial_info {initial_info:?}");
+        trace!("UsbDevice::read_basic_info initial_info {initial_info:?}");
         let mut info_buf = [0u8; DEV_INFO_SIZE];
         let len = self.read_control(CTRL_INIT as u8, 0, &mut info_buf)?;
 
@@ -779,7 +783,7 @@ impl UsbDevice {
 
     /// Read debug information from device
     fn read_debug_info(&mut self) -> Result<DeviceDebugInfo, InternalError> {
-        trace!("Device::read_debug_info");
+        trace!("UsbDevice::read_debug_info");
         let ver_cmds = [CTRL_GITREV, CTRL_GCCVER, CTRL_LIBCVER];
         let mut debug_info = DeviceDebugInfo::default();
         let mut info_buf = [0u8; DEV_INFO_SIZE];
@@ -860,7 +864,7 @@ impl UsbDevice {
 
 impl Drop for UsbDevice {
     fn drop(&mut self) {
-        trace!("Device::drop");
+        trace!("UsbDevice::drop");
         // Send shutdown command - ignoring errors since we're in drop
         let _ = self.write_control(CTRL_SHUTDOWN, 0, &[]);
 

@@ -49,23 +49,16 @@
 //!
 //! ## Getting Started
 //!
-//! The recommended way to create a new xum1541 interface is either through
-//! [`BusBuilder`] (or a device type specific one such as [`UsbBusBuilder`]),
-//! Or using the default() function on the device specific [`Bus`] type, such
-//! ass [`UsbBus`].
+//! The recommended way to create a new xum1541 interface is using
+//! [`BusBuilder`].
 //!
 //! ```rust,no_run
-//! use xum1541::{UsbBus, BusBuilder, UsbBusBuilder};
+//! use xum1541::BusBuilder;
 //!
-//! let mut bus = UsbBusBuilder::new()
-//!     .device_serial_number(0)  // Use first available device
-//!     .build().unwrap();
+//! let mut bus = BusBuilder::new()
+//!     .build()
+//!     .unwrap();
 //!     
-//! bus.initialize().unwrap();
-//!
-//! // Or
-//!
-//! let mut bus = UsbBus::default().unwrap();
 //! bus.initialize().unwrap();
 //! ```
 //!
@@ -108,12 +101,12 @@
 //!
 //! ```rust,no_run
 //! use rusb::{Context, UsbContext};
-//! use xum1541::{BusBuilder, UsbBusBuilder};
+//! use xum1541::BusBuilder;
 //!
 //! let mut context = Context::new().unwrap();
 //! context.set_log_level(rusb::LogLevel::Debug);
 //!
-//! let bus = UsbBusBuilder::new()
+//! let bus = BusBuilder::new()
 //!     .context(context)
 //!     .build()
 //!     .unwrap();
@@ -147,11 +140,11 @@
 //! * [`examples/basic.rs`](examples/basic.rs) - A more complex example which enables logging (run with `RUST_LOG=info`` for example) queries the device's capabilities and drive status.
 //!
 //! ```rust,no_run
-//! use xum1541::{BusBuilder, UsbBusBuilder, DeviceChannel, Error};
+//! use xum1541::{BusBuilder, DeviceChannel, Error};
 //!
 //! fn main() -> Result<(), Error> {
 //!     // Connect to the XUM1541 device
-//!     let mut bus = UsbBusBuilder::new().build()?;
+//!     let mut bus = BusBuilder::new().build()?;
 //!
 //!     // Initialize the bus
 //!     bus.initialize()?;
@@ -254,19 +247,18 @@ pub use crate::constants::{
     Ioctl, DEVICE_MAX_NUM, DEVICE_MIN_NUM, DRIVE_MAX_CHANNEL, DRIVE_MIN_CHANNEL,
 };
 
-pub use crate::bus::remoteusb::{RemoteUsbBus, RemoteUsbBusBuilder};
-pub use crate::bus::usb::{UsbBus, UsbBusBuilder};
-pub use crate::bus::DEFAULT_TIMEOUT as BUS_DEFAULT_TIMEOUT;
 /// Bus types
+pub use crate::bus::DEFAULT_TIMEOUT as BUS_DEFAULT_TIMEOUT;
 pub use crate::bus::{Bus, BusBuilder};
 
 pub use crate::device::remoteusb::{
     RemoteUsbDevice, RemoteUsbDeviceConfig, RemoteUsbInfo, UsbDeviceServer,
 };
 pub use crate::device::usb::{UsbDevice, UsbDeviceConfig, UsbInfo};
-pub use crate::device::Config as DeviceConfig;
 /// Device types
-pub use crate::device::{Config, Device, DeviceDebugInfo, DeviceInfo, SpecificDeviceInfo};
+pub use crate::device::{
+    Config, Device, DeviceConfig, DeviceDebugInfo, DeviceInfo, DeviceType, SpecificDeviceInfo,
+};
 
 /// Struct holding device and channel numbers.  Used by [`crate::Bus`] functions
 /// which require the device and channel to be specified.

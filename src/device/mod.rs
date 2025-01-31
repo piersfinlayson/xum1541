@@ -7,16 +7,137 @@ pub mod remoteusb;
 pub mod usb;
 
 use serde::{Deserialize, Serialize};
-pub use usb::UsbDevice;
 
-use crate::constants::*;
+pub use remoteusb::RemoteUsbDevice;
+pub use usb::{UsbDevice, UsbInfo};
+
+use crate::{constants::*, RemoteUsbInfo};
 use crate::{Error, Ioctl};
+use crate::{RemoteUsbDeviceConfig, UsbDeviceConfig};
+
+#[derive(Debug, Clone)]
+pub enum DeviceType {
+    Usb(UsbDevice),
+    RemoteUsb(RemoteUsbDevice),
+}
+
+#[derive(Debug, Clone)]
+pub enum DeviceConfig {
+    Usb(UsbDeviceConfig),
+    RemoteUsb(RemoteUsbDeviceConfig),
+}
+
+impl DeviceType {
+    pub fn new(config: DeviceConfig) -> Result<Self, Error> {
+        match config {
+            DeviceConfig::Usb(config) => UsbDevice::new(Some(config)).map(Self::Usb),
+            DeviceConfig::RemoteUsb(config) => {
+                RemoteUsbDevice::new(Some(config)).map(Self::RemoteUsb)
+            }
+        }
+    }
+
+    pub fn init(&mut self) -> Result<(), Error> {
+        match self {
+            Self::Usb(device) => device.init(),
+            Self::RemoteUsb(device) => device.init(),
+        }
+    }
+
+    pub fn info(&mut self) -> Option<DeviceInfo> {
+        match self {
+            Self::Usb(device) => device.info(),
+            Self::RemoteUsb(device) => device.info(),
+        }
+    }
+
+    pub fn usb_info(&mut self) -> Option<UsbInfo> {
+        match self {
+            Self::Usb(device) => device.specific_info(),
+            Self::RemoteUsb(device) => device.specific_info().and_then(|i| i.usb_info),
+        }
+    }
+
+    pub fn remote_usb_info(&mut self) -> Option<RemoteUsbInfo> {
+        match self {
+            Self::Usb(_) => None,
+            Self::RemoteUsb(device) => device.specific_info(),
+        }
+    }
+
+    pub fn sw_debug_info(&mut self) -> SwDebugInfo {
+        match self {
+            Self::Usb(device) => device.sw_debug_info(),
+            Self::RemoteUsb(device) => device.sw_debug_info(),
+        }
+    }
+
+    pub fn hard_reset_and_re_init(&mut self) -> Result<(), Error> {
+        match self {
+            Self::Usb(device) => device.hard_reset_and_re_init(),
+            Self::RemoteUsb(device) => device.hard_reset_and_re_init(),
+        }
+    }
+
+    pub fn read_control(
+        &mut self,
+        request: u8,
+        value: u16,
+        buffer: &mut [u8],
+    ) -> Result<usize, Error> {
+        match self {
+            Self::Usb(device) => device.read_control(request, value, buffer),
+            Self::RemoteUsb(device) => device.read_control(request, value, buffer),
+        }
+    }
+
+    pub fn write_control(&mut self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Error> {
+        match self {
+            Self::Usb(device) => device.write_control(request, value, buffer),
+            Self::RemoteUsb(device) => device.write_control(request, value, buffer),
+        }
+    }
+
+    pub fn write_data(&mut self, mode: u8, data: &[u8]) -> Result<usize, Error> {
+        match self {
+            Self::Usb(device) => device.write_data(mode, data),
+            Self::RemoteUsb(device) => device.write_data(mode, data),
+        }
+    }
+
+    pub fn read_data(&mut self, mode: u8, buffer: &mut [u8]) -> Result<usize, Error> {
+        match self {
+            Self::Usb(device) => device.read_data(mode, buffer),
+            Self::RemoteUsb(device) => device.read_data(mode, buffer),
+        }
+    }
+
+    pub fn wait_for_status(&mut self) -> Result<u16, Error> {
+        match self {
+            Self::Usb(device) => device.wait_for_status(),
+            Self::RemoteUsb(device) => device.wait_for_status(),
+        }
+    }
+
+    pub fn ioctl(
+        &mut self,
+        ioctl: Ioctl,
+        address: u8,
+        secondary_address: u8,
+    ) -> Result<Option<u16>, Error> {
+        match self {
+            Self::Usb(device) => device.ioctl(ioctl, address, secondary_address),
+            Self::RemoteUsb(device) => device.ioctl(ioctl, address, secondary_address),
+        }
+    }
+}
 
 pub trait Config: std::fmt::Debug {}
 
 /// The core Device trait, which allows Device to be mocked out for testing
 pub trait Device: std::fmt::Debug + Send + Clone {
     type Config;
+    type SpecificDeviceInfo;
 
     /// Creates a new Device using the provided config, which can be
     /// omitted in order to create a Device using default configuration.
@@ -46,32 +167,6 @@ pub trait Device: std::fmt::Debug + Send + Clone {
     where
         Self: Sized;
 
-    /// Retrieve this Device's current configuration state
-    ///
-    /// # Returns
-    /// * `Some(&Self::Config)` - The current configuration state of this device
-    /// * `None` - There is no configuration state to expose
-    ///
-    /// The configuration returned may include both user-provided settings and
-    /// implementation-specific state that was created during device
-    /// initialization.  For example, a USB device might return a
-    /// configuration containing its [`rusb::Context`]even if one wasn't
-    /// provided during construction.
-    ///
-    /// # Example
-    ///
-    /// ```rust,no_run
-    /// use xum1541::{Device, UsbDevice};
-    ///
-    /// let device = UsbDevice::new(None).unwrap();
-    /// if let Some(config) = device.current_config() {
-    ///     println!("Device returned some current config {:?}", config);
-    /// } else {
-    ///    println!("Device returned no current config");
-    /// }
-    /// ```
-    fn current_config(&self) -> Option<&Self::Config>;
-
     /// Initialize the Device.
     ///
     /// This function
@@ -87,7 +182,16 @@ pub trait Device: std::fmt::Debug + Send + Clone {
     /// [`Option<&DeviceInfo>`].
     ///
     /// May be None, in which case the Device has not been initialized
-    fn info(&mut self) -> Option<&DeviceInfo>;
+    fn info(&mut self) -> Option<DeviceInfo>;
+
+    /// Returns [`SpecificDeviceInfo`] for this device, as an
+    /// ['Option<SpecificDeviceInfo']
+    ///
+    /// Will be None if the device hasn't been initialized
+    fn specific_info(&mut self) -> Option<Self::SpecificDeviceInfo>;
+
+    /// Returns [`SwDebugInfo`] for this device
+    fn sw_debug_info(&mut self) -> SwDebugInfo;
 
     /// Do a hard reset of the device, and reinitialize it afterwards.
     ///
@@ -189,6 +293,26 @@ pub trait Device: std::fmt::Debug + Send + Clone {
         address: u8,
         secondary_address: u8,
     ) -> Result<Option<u16>, Error>;
+}
+
+/// Debug information about this Device software object
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwDebugInfo {
+    /// Number of API calls made to this object that led to this object
+    /// querying the device
+    pub api_calls: u64,
+}
+
+impl Default for SwDebugInfo {
+    fn default() -> Self {
+        SwDebugInfo { api_calls: 0 }
+    }
+}
+
+impl SwDebugInfo {
+    pub(crate) fn increment_api_call(&mut self) {
+        self.api_calls += 1;
+    }
 }
 
 /// DeviceInfo contains information read from the XUM1541 device.
@@ -310,6 +434,5 @@ impl Default for DeviceDebugInfo {
 pub trait SpecificDeviceInfo {
     type Info;
 
-    fn specific_info(&self) -> Option<&Self::Info>;
-    fn print_specific(&self);
+    fn print(&self);
 }

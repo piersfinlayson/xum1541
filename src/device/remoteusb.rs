@@ -10,9 +10,10 @@
 //! server implementation
 
 use crate::constants::{Ioctl, CTRL_SHUTDOWN};
+use crate::device::SwDebugInfo;
 use crate::{CommunicationError, DeviceAccessError, Error};
 use crate::{Device, DeviceInfo, SpecificDeviceInfo};
-use crate::{UsbDevice, UsbDeviceConfig};
+use crate::{UsbDevice, UsbDeviceConfig, UsbInfo};
 
 use bincode::{deserialize, serialize};
 #[allow(unused_imports)]
@@ -63,36 +64,24 @@ impl From<RemoteUsbDeviceConfig> for UsbDeviceConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteUsbInfo {
-    pub vendor_id: u16,
-    pub product_id: u16,
-    pub bus_number: u8,
-    pub device_address: u8,
+    /// Standard UsbInfo retrieved over the network from UsbDevice
+    pub usb_info: Option<UsbInfo>,
+
+    /// Remote specific info, containing data about the connection to
+    /// UsbDevice
+    pub bind_addr: SocketAddr,
 }
 
-impl SpecificDeviceInfo for RemoteUsbDevice {
+impl SpecificDeviceInfo for RemoteUsbInfo {
     type Info = RemoteUsbInfo;
 
-    fn specific_info(&self) -> Option<&Self::Info> {
-        // TODO implement - need another message type
-        //if let Some(info) = &self.usb_info {
-        //    Some(&info)
-        //} else {
-        None
-        //}
-    }
-
-    fn print_specific(&self) {
-        if let Some(info) = self.specific_info() {
-            println!("  - device: {:04x}:{:04x}", info.vendor_id, info.product_id);
-            println!(
-                "  - bus/address: {:03}-{:03}",
-                info.bus_number, info.device_address
-            );
-        } else {
-            println!("  - no USB device information");
+    fn print(&self) {
+        if self.usb_info.is_some() {
+            self.usb_info.clone().unwrap().print();
         }
+        println!("  - bind address: {}", self.bind_addr);
     }
 }
 
@@ -115,8 +104,6 @@ impl From<RemoteUsbConfigWrapper> for Option<UsbDeviceConfig> {
 enum RemoteDeviceRequest {
     New(Option<RemoteUsbDeviceConfig>),
     Init,
-    CurrentConfig,
-    Info,
     HardResetAndReInit,
     ReadControl {
         request: u8,
@@ -149,8 +136,6 @@ impl std::fmt::Display for RemoteDeviceRequest {
         match self {
             RemoteDeviceRequest::New(config) => write!(f, "New({:?})", config),
             RemoteDeviceRequest::Init => write!(f, "Init"),
-            RemoteDeviceRequest::CurrentConfig => write!(f, "CurrentConfig"),
-            RemoteDeviceRequest::Info => write!(f, "Info"),
             RemoteDeviceRequest::HardResetAndReInit => write!(f, "HardResetAndReInit"),
             RemoteDeviceRequest::ReadControl {
                 request,
@@ -203,9 +188,7 @@ impl std::fmt::Display for RemoteDeviceRequest {
 #[derive(Debug, Serialize, Deserialize)]
 enum RemoteDeviceResponse {
     New(Result<(), Error>),
-    Init(Result<(), Error>),
-    CurrentConfig(Option<RemoteUsbDeviceConfig>),
-    Info(Option<DeviceInfo>),
+    Init(Result<(DeviceInfo, UsbInfo), Error>),
     HardResetAndReInit(Result<(), Error>),
     ReadControl(Result<(Vec<u8>, usize), Error>),
     WriteControl(Result<(), Error>),
@@ -220,8 +203,6 @@ impl std::fmt::Display for RemoteDeviceResponse {
         match self {
             RemoteDeviceResponse::New(result) => write!(f, "New({:?})", result),
             RemoteDeviceResponse::Init(result) => write!(f, "Init({:?})", result),
-            RemoteDeviceResponse::CurrentConfig(config) => write!(f, "CurrentConfig({:?})", config),
-            RemoteDeviceResponse::Info(info) => write!(f, "Info({:?})", info),
             RemoteDeviceResponse::HardResetAndReInit(result) => {
                 write!(f, "HardResetAndReInit({:?})", result)
             }
@@ -240,12 +221,15 @@ impl std::fmt::Display for RemoteDeviceResponse {
 pub struct DeviceClient {
     stream: Option<Arc<Mutex<TcpStream>>>,
     device_config: RemoteUsbDeviceConfig,
-    device_info: DeviceInfo,
+    device_info: Option<DeviceInfo>,
+    remote_usb_info: RemoteUsbInfo,
+    sw_debug_info: SwDebugInfo,
 }
 pub use DeviceClient as RemoteUsbDevice;
 
 impl DeviceClient {
-    pub(crate) fn connect(config: Option<RemoteUsbDeviceConfig>) -> Result<Self, Error> {
+    fn connect(config: Option<RemoteUsbDeviceConfig>) -> Result<Self, Error> {
+        trace!("DeviceClient::connect");
         let remote_addr = match &config {
             Some(config) => config.remote_addr.unwrap_or(default_socket_addr()),
             None => default_socket_addr(),
@@ -257,17 +241,32 @@ impl DeviceClient {
                 errno: e.raw_os_error().unwrap_or(libc::EIO),
             },
         })?;
+
+        let local_addr = stream.local_addr().map_err(|e| Error::DeviceAccess {
+            kind: DeviceAccessError::NetworkConnection {
+                message: format!("Failed to get local address: {}", e),
+                errno: e.raw_os_error().unwrap_or(libc::EIO),
+            },
+        })?;
+        let remote_usb_info = RemoteUsbInfo {
+            usb_info: None,
+            bind_addr: local_addr,
+        };
+
         Ok(Self {
             stream: Some(Arc::new(Mutex::new(stream))),
             device_config: RemoteUsbDeviceConfig {
                 serial_num: config.and_then(|c| c.serial_num),
                 remote_addr: Some(remote_addr),
             },
-            device_info: DeviceInfo::default(),
+            device_info: None,
+            remote_usb_info: remote_usb_info,
+            sw_debug_info: SwDebugInfo::default(),
         })
     }
 
     fn stream_or_err(&mut self) -> Result<Arc<Mutex<TcpStream>>, Error> {
+        trace!("DeviceClient::stream_or_err");
         match &self.stream {
             Some(stream) => Ok(stream.clone()),
             None => Err(Error::DeviceAccess {
@@ -283,6 +282,7 @@ impl DeviceClient {
         &mut self,
         request: RemoteDeviceRequest,
     ) -> Result<RemoteDeviceResponse, Error> {
+        trace!("DeviceClient::send_request");
         let stream = self.stream_or_err()?;
 
         let data = serialize(&request).map_err(|e| Error::DeviceAccess {
@@ -348,6 +348,7 @@ impl DeviceClient {
     }
 
     fn unexpected_response(request: &str, rsp: RemoteDeviceResponse) -> Error {
+        trace!("DeviceClient::unexpected_response");
         Error::Communication {
             kind: CommunicationError::Remote {
                 message: format!("Unexpected response for {}: {}", request, rsp),
@@ -359,8 +360,10 @@ impl DeviceClient {
 
 impl Device for DeviceClient {
     type Config = RemoteUsbDeviceConfig;
+    type SpecificDeviceInfo = RemoteUsbInfo;
 
     fn new(config: Option<Self::Config>) -> Result<Self, Error> {
+        trace!("RemoteUsbDevice::new");
         let mut client = DeviceClient::connect(config)?;
 
         let usb_config = UsbDeviceConfig {
@@ -381,36 +384,40 @@ impl Device for DeviceClient {
         }
     }
 
-    // We don't need to query the remote device for the current config as
-    // we store it, and it's RemoteUsbDeviceConfig (our config type) anyway
-    fn current_config(&self) -> Option<&Self::Config> {
-        Some(&self.device_config)
-    }
-
     fn init(&mut self) -> Result<(), Error> {
+        trace!("RemoteUsbDevice::init");
+        self.sw_debug_info.increment_api_call();
         match self.send_request(RemoteDeviceRequest::Init)? {
-            RemoteDeviceResponse::Init(result) => result,
+            RemoteDeviceResponse::Init(result) => match result {
+                Ok((device_info, usb_info)) => {
+                    self.device_info = Some(device_info);
+                    self.remote_usb_info.usb_info = Some(usb_info);
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            },
             rsp => Err(Self::unexpected_response("Init", rsp)),
         }
     }
 
-    fn info(&mut self) -> Option<&DeviceInfo> {
-        match self.send_request(RemoteDeviceRequest::Info) {
-            Ok(RemoteDeviceResponse::Info(info)) => match info {
-                Some(info) => {
-                    self.device_info = info;
-                    Some(&self.device_info)
-                }
-                None => {
-                    self.device_info = DeviceInfo::default();
-                    None
-                }
-            },
-            _ => None,
-        }
+    fn info(&mut self) -> Option<DeviceInfo> {
+        trace!("RemoteUsbDevice::info");
+        self.device_info.clone()
+    }
+
+    fn specific_info(&mut self) -> Option<Self::SpecificDeviceInfo> {
+        trace!("RemoteUsbDevice::specific_info");
+        Some(self.remote_usb_info.clone())
+    }
+
+    fn sw_debug_info(&mut self) -> SwDebugInfo {
+        trace!("RemoteUsbDevice::sw_debug_info");
+        self.sw_debug_info.clone()
     }
 
     fn hard_reset_and_re_init(&mut self) -> Result<(), Error> {
+        trace!("RemoteUsbDevice::hard_reset_and_re_init");
+        self.sw_debug_info.increment_api_call();
         match self.send_request(RemoteDeviceRequest::HardResetAndReInit)? {
             RemoteDeviceResponse::HardResetAndReInit(result) => result,
             rsp => Err(Self::unexpected_response("HardResetAndReInit", rsp)),
@@ -418,6 +425,8 @@ impl Device for DeviceClient {
     }
 
     fn read_control(&mut self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize, Error> {
+        trace!("RemoteUsbDevice::read_control");
+        self.sw_debug_info.increment_api_call();
         match self.send_request(RemoteDeviceRequest::ReadControl {
             request,
             value,
@@ -433,6 +442,8 @@ impl Device for DeviceClient {
     }
 
     fn write_control(&mut self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Error> {
+        trace!("RemoteUsbDevice::write_control");
+        self.sw_debug_info.increment_api_call();
         match self.send_request(RemoteDeviceRequest::WriteControl {
             request,
             value,
@@ -444,6 +455,8 @@ impl Device for DeviceClient {
     }
 
     fn write_data(&mut self, mode: u8, data: &[u8]) -> Result<usize, Error> {
+        trace!("RemoteUsbDevice::write_data");
+        self.sw_debug_info.increment_api_call();
         match self.send_request(RemoteDeviceRequest::WriteData {
             mode,
             data: data.to_vec(),
@@ -454,6 +467,8 @@ impl Device for DeviceClient {
     }
 
     fn read_data(&mut self, mode: u8, buffer: &mut [u8]) -> Result<usize, Error> {
+        trace!("RemoteUsbDevice::read_data");
+        self.sw_debug_info.increment_api_call();
         match self.send_request(RemoteDeviceRequest::ReadData {
             mode,
             buffer_size: buffer.len(),
@@ -468,6 +483,8 @@ impl Device for DeviceClient {
     }
 
     fn wait_for_status(&mut self) -> Result<u16, Error> {
+        trace!("RemoteUsbDevice::wait_for_status");
+        self.sw_debug_info.increment_api_call();
         match self.send_request(RemoteDeviceRequest::WaitForStatus)? {
             RemoteDeviceResponse::WaitForStatus(result) => result,
             rsp => Err(Self::unexpected_response("WaitForStatus", rsp)),
@@ -480,6 +497,8 @@ impl Device for DeviceClient {
         address: u8,
         secondary_address: u8,
     ) -> Result<Option<u16>, Error> {
+        trace!("RemoteUsbDevice::ioctl");
+        self.sw_debug_info.increment_api_call();
         match self.send_request(RemoteDeviceRequest::Ioctl {
             ioctl,
             address,
@@ -500,6 +519,7 @@ pub struct UsbDeviceServer {
 
 impl UsbDeviceServer {
     pub fn new(device: UsbDevice, bind_addr: SocketAddr) -> Result<Self, Error> {
+        trace!("UsbDeviceServer::new");
         let listener = TcpListener::bind(bind_addr).map_err(|e| Error::Communication {
             kind: CommunicationError::Remote {
                 message: format!("Failed to bind server: {}", e),
@@ -520,6 +540,7 @@ impl UsbDeviceServer {
     // so will the [`UsbDevice`], which will trigger a release of the USB
     // interface
     pub fn serve(&mut self) -> Result<(), Error> {
+        trace!("UsbDeviceServer::serve");
         loop {
             match self.serve_one_connection() {
                 Ok(_) => continue,
@@ -544,6 +565,7 @@ impl UsbDeviceServer {
 
     /// Runs the USB Device serving a single connection - then returns
     fn serve_one_connection(&mut self) -> Result<(), Error> {
+        trace!("UsbDeviceServer::serve_one_connection");
         // Since this is 1:1, we only accept one connection
         let (mut stream, _) = self.listener.accept().map_err(|e| Error::Communication {
             kind: CommunicationError::Remote {
@@ -626,20 +648,20 @@ impl UsbDeviceServer {
 
             let response = match request {
                 RemoteDeviceRequest::New(_config) => RemoteDeviceResponse::New(Ok(())),
-                RemoteDeviceRequest::Init => RemoteDeviceResponse::Init(self.device.init()),
-                RemoteDeviceRequest::CurrentConfig => {
-                    let config = self.device.current_config();
-                    let mapped_config = match config {
-                        Some(config) => Some(RemoteUsbDeviceConfig {
-                            serial_num: config.serial_num,
-                            remote_addr: None, // Set by client
-                        }),
-                        None => None,
+                RemoteDeviceRequest::Init => {
+                    let rsp = self.device.init();
+                    // The network API version of Init returns DeviceInfo
+                    // and UsbInfo
+                    // device.init() (if it succeeds) always sets these both
+                    // to Some, so we're OK to unwrap here
+                    let new_rsp = match rsp {
+                        Ok(_) => Ok((
+                            self.device.info().unwrap(),
+                            self.device.specific_info().unwrap(),
+                        )),
+                        Err(e) => Err(e),
                     };
-                    RemoteDeviceResponse::CurrentConfig(mapped_config)
-                }
-                RemoteDeviceRequest::Info => {
-                    RemoteDeviceResponse::Info(self.device.info().cloned())
+                    RemoteDeviceResponse::Init(new_rsp)
                 }
                 RemoteDeviceRequest::HardResetAndReInit => {
                     RemoteDeviceResponse::HardResetAndReInit(self.device.hard_reset_and_re_init())

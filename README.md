@@ -31,11 +31,11 @@ cargo add xum1541
 ## Usage
 
 ```rust
-use xum1541::{UsbBus, DeviceChannel, Error};
+use xum1541::{BusBuilder, DeviceChannel, Error};
 
 fn main() -> Result<(), Error> {
     // Connect to the XUM1541 device via USB
-    let mut bus = UsbBus::default()?;
+    let mut bus = BusBuilder::new().build()?;
 
     // Initialize the bus
     bus.initialize()?;
