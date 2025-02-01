@@ -21,7 +21,7 @@
 //! It is expected that in a production environment, this server would be
 //! run as a service, and would be managed by a process manager such as
 //! systemd, upstart, or supervisord.
-use xum1541::device::remoteusb::{DEFAULT_ADDR, DEFAULT_PORT};
+use xum1541::device::remoteusb::DEFAULT_PORT;
 use xum1541::{Device, Error, UsbDevice, UsbDeviceServer};
 
 use env_logger;
@@ -34,11 +34,12 @@ fn execute() -> Result<(), Error> {
     info!("Create USB Device");
     let device = UsbDevice::new(None)?;
 
+    let addr = "0.0.0.0";
     info!(
         "Create Remote USB Device to listen on {}:{}",
-        DEFAULT_ADDR, DEFAULT_PORT
+        addr, DEFAULT_PORT
     );
-    let ip_addr = IpAddr::from_str(DEFAULT_ADDR).map_err(|e| Error::Args {
+    let ip_addr = IpAddr::from_str(addr).map_err(|e| Error::Args {
         message: format!("Failed to parse address: {}", e),
     })?;
     let bind_addr = SocketAddr::new(ip_addr, DEFAULT_PORT);
