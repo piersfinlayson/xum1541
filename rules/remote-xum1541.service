@@ -1,0 +1,16 @@
+[Unit]
+Description=Remote xum1541 Service
+After=network.target
+
+[Service]
+Type=simple
+Environment="RUST_LOG=info"
+ExecStart=/home/pi/xum1541/target/release/device-server
+StandardOutput=journal
+StandardError=journal
+Restart=always
+RestartSec=5
+User=pi
+
+[Install]
+WantedBy=multi-user.target

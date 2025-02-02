@@ -16,11 +16,11 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # Get the xum1541 source code
 git clone https://github.com/piersfinlayson/xum1541
 
-# Build and instal the xum1541 udev rules file
+# Build and install the xum1541 udev rules file
 ./install.sh
 
-# Run it
-RUST_LOG=info cargo run --release --bin device-server
+# Set it up as a service
+./remote-setup.sh
 ```
 
 Then run the client (rs1541, rs1541fs, etc) in remote mode, pointing it at the remote node's IP address.
