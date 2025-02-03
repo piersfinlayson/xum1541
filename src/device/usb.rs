@@ -485,7 +485,6 @@ impl UsbDevice {
         trace!("UsbDevice::find_device context {context:?} serial_num {serial_num:?}");
 
         let mut found_serial_nums = vec![];
-        let serial_num = serial_num.unwrap_or(0);
         for device in context.devices()?.iter() {
             let device_desc = device.device_descriptor()?;
             trace!(
@@ -504,22 +503,28 @@ impl UsbDevice {
                 match handle.read_serial_number_string_ascii(&device_desc) {
                     Ok(serial) => {
                         if let Ok(num) = serial.parse::<u8>() {
-                            if num == serial_num {
+                            if serial_num.is_none() {
+                                debug!("Was looking for any serial number, found {num}");
+                                return Ok((device, handle))
+                            } else if Some(num) == serial_num {
                                 debug!("Found device with matching serial number {num}");
                                 return Ok((device, handle));
                             }
-                            found_serial_nums.push(num);
-                            debug!(
-                                "Device serial number {num} didn't match requested {serial_num}",
-                            );
+                            else {
+                                found_serial_nums.push(num);
+                                debug!(
+                                    "Device serial number {num} didn't match requested {}", serial_num.unwrap(),
+                                );    
+                            }
                         }
                     }
                     Err(e) => {
                         info!("Couldn't read device serial number: {}", e);
-                        if serial_num == 0 {
+                        if serial_num.is_none() {
                             // Despite failing to read the serial number
                             // we can still use the device if serial
                             // 0 was specified
+                            debug!("Was looking for any serial number, found device with no serial number");
                             return Ok((device, handle));
                         }
                     }
@@ -528,7 +533,7 @@ impl UsbDevice {
         }
 
         let err = if found_serial_nums.len() > 0 {
-            info!("No matching XUM1541 device found {serial_num}, but found non-matching serial(s) {found_serial_nums:?}");
+            info!("No matching XUM1541 device found {serial_num:?}, but found non-matching serial(s) {found_serial_nums:?}");
             Error::DeviceAccess {
                 kind: DeviceAccessError::SerialMismatch {
                     vid: XUM1541_VID,

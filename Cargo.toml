@@ -36,3 +36,4 @@ parking_lot = "0.12"  # Used for RemoteUsbDevice
 env_logger = "0.11"  # Required by xum1541-device-server and examples
 
 [dev-dependencies]
+clap = { version = "4.5", features = ["derive"] }  # Required by examples/serial.rs

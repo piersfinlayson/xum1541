@@ -42,12 +42,12 @@ pub enum DeviceAccess {
     #[error("XUM1541 device {vid:04x}/{pid:04x} not found - is it connected and do you have permissions to access it?")]
     NotFound { vid: u16, pid: u16 },
 
-    #[error("XUM1541 device found, but non-matching serial numbers. Found {actual:?}, was looking for {expected}")]
+    #[error("XUM1541 device found, but non-matching serial numbers. Found {actual:?}, was looking for {expected:?}")]
     SerialMismatch {
         vid: u16,
         pid: u16,
         actual: Vec<u8>,
-        expected: u8,
+        expected: Option<u8>,
     },
 
     #[error(
