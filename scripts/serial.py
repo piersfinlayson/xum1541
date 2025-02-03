@@ -16,10 +16,6 @@ def write_serial(serial_num):
     # Write the inverted serial number
     ih[0] = eeprom_value
     
-    # Fill rest of page with 0xFF (unprogrammed state)
-    for addr in range(1, 0x80):
-        ih[addr] = 0xff
-        
     # Write to file
     filename = "eeprom-serial.hex"
     ih.write_hex_file(filename)
