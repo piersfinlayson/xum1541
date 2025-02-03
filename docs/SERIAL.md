@@ -16,7 +16,8 @@ Then run the following in order, where the order is important, as you cannot wri
 ```
 dfu-programmer atmega32u2 erase --force
 dfu-programmer atmega32u2 flash --eeprom eeprom-serial.hex
-xum1541cfg update xum1541-ZOOMFLOPPY-v08.hex
+dfu-programmer atmega32u2 flash  xum1541-ZOOMFLOPPY-v08.hex
+dfu-programmer reset
 ```
 
 If you are using usbipd to attach your xum1541 to WSL, you will need to re-bind the xum1541 after changing its serial number.
