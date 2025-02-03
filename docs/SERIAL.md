@@ -16,7 +16,7 @@ Then run the following in order, where the order is important, as you cannot wri
 ```
 dfu-programmer atmega32u2 erase --force
 dfu-programmer atmega32u2 flash --eeprom eeprom-serial.hex
-dfu-programmer atmega32u2 flash  xum1541-ZOOMFLOPPY-v08.hex
+dfu-programmer atmega32u2 flash xum1541-ZOOMFLOPPY-v08.hex
 dfu-programmer reset
 ```
 
