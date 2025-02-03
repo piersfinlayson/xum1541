@@ -2,9 +2,10 @@
 
 First download and install [dfu-programmer](https://github.com/dfu-programmer/dfu-programmer/releases), into your `/usr/local/bin` directory.
 
-Use [`scripts/serial.py`](https://raw.githubusercontent.com/piersfinlayson/xum1541/refs/head/main/scripts/serial.py) to produce an eeprom-serial.hex file
+Use [`scripts/serial.py`](https://raw.githubusercontent.com/piersfinlayson/xum1541/refs/heads/main/scripts/serial.py) to produce an eeprom-serial.hex file.  You will need to `pip install intelhex` first, if you don't have that package installed already.
 
 ```
+pip install intelhex
 scripts/serial.py 123
 ```
 
@@ -14,7 +15,7 @@ Then run the following in order, where the order is important, as you cannot wri
 
 ```
 dfu-programmer atmega32u2 erase --force
-dfu-programmer atmega32u2 flash --eeprom serial.hex
+dfu-programmer atmega32u2 flash --eeprom remote-serial.hex
 xum1541cfg update xum1541-ZOOMFLOPPY-v08.hex
 ```
 
