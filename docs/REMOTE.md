@@ -17,10 +17,10 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git clone https://github.com/piersfinlayson/xum1541
 
 # Build and install the xum1541 udev rules file
-./install.sh
+./scripts/install.sh
 
 # Set it up as a service
-./remote-setup.sh
+./scripts/remote-setup.sh
 ```
 
 Then run the client (rs1541, rs1541fs, etc) in remote mode, pointing it at the remote node's IP address.
