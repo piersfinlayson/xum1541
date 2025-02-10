@@ -3,8 +3,8 @@ use crate::constants::{CTRL_RESET, PROTO_CBM};
 use crate::device::SwDebugInfo;
 #[allow(unused_imports)]
 use crate::DeviceChannel;
-use crate::{CommunicationError, Error};
-use crate::{DeviceInfo, DeviceType};
+use crate::{CommunicationError, DeviceAccessError, DeviceConfig, Error};
+use crate::{DeviceInfo, DeviceType, RemoteUsbDeviceConfig, UsbDeviceConfig};
 use crate::{Ioctl, RemoteUsbInfo, UsbInfo};
 use cmd::{BusCommand, BusMode};
 
@@ -20,6 +20,28 @@ pub use builder::BusBuilder;
 /// Default Bus timeout - currently unused, but may be passed to [`Bus::new`]
 /// and [`crate::UsbBusBuilder::timeout`]
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Types of device failure recovery supported by the Bus
+#[derive(Debug, Clone, PartialEq)]
+pub enum BusRecoveryType {
+    /// Will not attempt to auto recover the device
+    Off,
+
+    /// Will attempt to auto recover the device.  First it will try to create
+    /// a device with the same serial number as before.  If that fails, it
+    /// will accept any serial number
+    All,
+
+    /// Will attempt to auto recover the device, but only if the serial number
+    /// matches the original device
+    Serial,
+}
+
+impl Default for BusRecoveryType {
+    fn default() -> Self {
+        BusRecoveryType::Off
+    }
+}
 
 /// The [`Bus`] struct is the main interface for accessing Commodore disk
 /// drives.  it provides key bus-level primitives.
@@ -41,6 +63,8 @@ pub struct Bus {
     device: DeviceType,
     _timeout: Duration,
     mode: BusMode,
+    serial: Option<String>,
+    auto_recover: BusRecoveryType,
 }
 
 /// Public [`Bus`] functions
@@ -74,7 +98,18 @@ impl Bus {
             device,
             _timeout: timeout,
             mode: BusMode::default(),
+            serial: None,
+            auto_recover: BusRecoveryType::default(),
         }
+    }
+
+    /// Sets this Bus to try to auto recover from a device failure
+    ///
+    /// The auto recover mechansim will try to create a new device object
+    /// of the same type as the original device, and with the same serial
+    /// number.  It will only
+    pub fn set_recovery_type(&mut self, recovery_type: BusRecoveryType) {
+        self.auto_recover = recovery_type;
     }
 
     /// Initialize both the [`Bus`] and [`Device`] instances simultaneously
@@ -86,8 +121,7 @@ impl Bus {
     /// # Example
     /// See [`Bus::new`]
     pub fn initialize(&mut self) -> Result<(), Error> {
-        trace!("Bus::initialize");
-        self.device.init()
+        self.initialize_retry(true)
     }
 
     /// Reset the IEC/IEEE-488 bus. Will reboot all attached drives and reset the talk/listen state.
@@ -98,7 +132,7 @@ impl Bus {
     pub fn reset(&mut self) -> Result<(), Error> {
         trace!("Entered Bus::reset");
         self.mode = BusMode::Idle;
-        self.device.write_control(CTRL_RESET, 0, &[])
+        self.with_retry(|device| device.write_control(CTRL_RESET, 0, &[]))
     }
 
     /// Instruct a drive to talk on the bus.
@@ -185,7 +219,7 @@ impl Bus {
         if let BusMode::Listening(_) = self.mode {
             warn!("Instructed to write data when Bus in mode {}", self.mode);
         }
-        self.device.read_data(PROTO_CBM, buf)
+        self.with_retry(|device| device.read_data(PROTO_CBM, buf))
     }
 
     /// Read data from the bus until either buf.len() bytes are read or pattern is matched.
@@ -295,7 +329,7 @@ impl Bus {
         if let BusMode::Talking(_) = self.mode {
             warn!("Instructed to write data when Bus in mode {}", self.mode);
         }
-        self.device.write_data(PROTO_CBM, buf)
+        self.with_retry(|device| device.write_data(PROTO_CBM, buf))
     }
 
     /// Sends an ioctl command to the device.  Reads status from the device
@@ -318,7 +352,7 @@ impl Bus {
         address: u8,
         secondary_address: u8,
     ) -> Result<Option<u16>, Error> {
-        self.device.ioctl(ioctl, address, secondary_address)
+        self.with_retry(|device| device.ioctl(ioctl, address, secondary_address))
     }
 
     /// Get EOI from the bus
@@ -365,7 +399,7 @@ impl Bus {
     /// `Ok(u16)` - the 2 byte status value from the device
     /// `Err(Error)` - the error on failure
     pub fn wait_for_status(&mut self) -> Result<u16, Error> {
-        self.device.wait_for_status()
+        self.with_retry(|device| device.wait_for_status())
     }
 
     /// Retrieve information about the underlying device.
@@ -373,19 +407,19 @@ impl Bus {
     /// # Returns
     /// * `Option<&DeviceInfo>` - device information if available
     pub fn device_info(&mut self) -> Option<DeviceInfo> {
-        self.device.info()
+        self.device.info() // Can't fail, so don't retry
     }
 
     pub fn usb_device_info(&mut self) -> Option<UsbInfo> {
-        self.device.usb_info()
+        self.device.usb_info() // Can't fail, so don't retry
     }
 
     pub fn remote_usb_device_info(&mut self) -> Option<RemoteUsbInfo> {
-        self.device.remote_usb_info()
+        self.device.remote_usb_info() // Can't fail, so don't retry
     }
 
     pub fn device_sw_debug_info(&mut self) -> SwDebugInfo {
-        self.device.sw_debug_info()
+        self.device.sw_debug_info() // Can't fail, so don't retry
     }
 
     /// Check if the bus is in listening mode.
@@ -421,7 +455,8 @@ impl Bus {
     fn read_one_byte(&mut self) -> Result<Option<u8>, Error> {
         trace!("Bus::read_one_byte");
         let mut temp = vec![0u8; 1];
-        match self.device.read_data(PROTO_CBM, &mut temp) {
+        let result = self.with_retry(|device| device.read_data(PROTO_CBM, &mut temp));
+        match result {
             Ok(0) => Ok(None), // EOF
             Ok(1) => {
                 trace!("Got a byte 0x{:02x}", temp[0]);
@@ -555,10 +590,11 @@ impl Bus {
 
         // Execute the command
         debug!("Bus:execute_command {command}");
-        let result = self
-            .device
-            .write_data(command.protocol(), &command.command_bytes())
-            .map(|_| ());
+        let result = self.with_retry(|device| {
+            device
+                .write_data(command.protocol(), &command.command_bytes())
+                .map(|_| ())
+        });
 
         if let Err(Error::Communication {
             kind: CommunicationError::StatusValue { value: _ },
@@ -577,5 +613,138 @@ impl Bus {
             }
         }
         result
+    }
+
+    // If the operation fails, and the failure looked like the device has
+    // become disconnected, try to recreate the device.  If that succeeds,
+    // try the operation again.
+    //
+    // Call like this:
+    //     self.with_retry(|device| device.ioctl(ioctl, 8, 15)
+    fn with_retry<T>(
+        &mut self,
+        mut f: impl FnMut(&mut DeviceType) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        match f(&mut self.device) {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                match e.clone() {
+                    Error::DeviceAccess { kind } => match kind {
+                        DeviceAccessError::NoDevice
+                        | DeviceAccessError::Permission
+                        | DeviceAccessError::NetworkConnection { .. } => {
+                            self.attempt_device_recovery(e.clone())?;
+                            info!("Device successfully recovered after error {}", e);
+                            f(&mut self.device)
+                        }
+                        _ => {
+                            warn!("Device appears to be disconnected - not retrying due to error type ({e})");
+                            Err(e)
+                        }
+                    },
+                    e => {
+                        warn!("Device appears to be disconnected - not retrying due to error type ({e})");
+                        Err(e)
+                    }
+                }
+            }
+        }
+    }
+
+    fn initialize_retry(&mut self, retry: bool) -> Result<(), Error> {
+        trace!("Bus::initialize");
+        match retry {
+            true => self.with_retry(|device| device.init())?,
+            false => self.device.init()?,
+        }
+        let info = self.device.info(); // Can't fail, don't retry
+        if let Some(info) = info {
+            self.serial = info.serial_number;
+        }
+        Ok(())
+    }
+
+    fn attempt_device_creation(&self, serial_num: Option<u8>) -> Result<DeviceType, Error> {
+        match &self.device {
+            DeviceType::Usb(_) => DeviceType::new(DeviceConfig::Usb(UsbDeviceConfig {
+                context: None,
+                serial_num,
+            })),
+            DeviceType::RemoteUsb(device) => {
+                let remote_addr = device.get_remote_addr();
+                DeviceType::new(DeviceConfig::RemoteUsb(RemoteUsbDeviceConfig {
+                    remote_addr,
+                    serial_num,
+                }))
+            }
+        }
+    }
+
+    // Attempts to recreate the device.  If this fails, we return the error
+    // argument as our Error, rather than an attempt_device_recovery error.
+    // This allows the caller to just pass our error back up the stack.
+    fn attempt_device_recovery(&mut self, error: Error) -> Result<(), Error> {
+        // First check that we should actually recover
+        if self.auto_recover == BusRecoveryType::Off {
+            debug!("Didn't try to auto-recover Device, as recovery disabled");
+            return Err(error);
+        }
+
+        // First of all we try and recover using the current serial number.
+        // If there isn't a serial number and we're in All mode, that's OK.
+        let serial = match &self.serial {
+            None => match self.auto_recover {
+                BusRecoveryType::All => None,
+                _ => {
+                    warn!("Auto-recovery of device requested, but we didn't have the device's serial bumber");
+                    return Err(error);
+                }
+            },
+            Some(serial_string) => match serial_string.parse::<u8>() {
+                Ok(num) => Some(num),
+                Err(e) => {
+                    warn!("Auto-recovery of device requested, but couldn't convert device's serial: {serial_string} to u8: {e}");
+                    return Err(error);
+                }
+            },
+        };
+
+        // Store off whether the current device was initialized - we will
+        // need to initialize the new one, if so
+        let was_initialized = self.device.initialized();
+
+        // Attempt to (re-)create the device.  If this fails, and we were
+        // trying with a specific serial number, and recovery type if All
+        // try again with a None serial number.
+        let result = self.attempt_device_creation(serial);
+        let result = match result {
+            Ok(device) => Ok(device),
+            Err(Error::DeviceAccess {
+                kind: DeviceAccessError::SerialMismatch { .. },
+            }) if serial.is_some() && self.auto_recover == BusRecoveryType::All => {
+                self.attempt_device_creation(None)
+            }
+            Err(e) => Err(e),
+        };
+        self.device = match result {
+            Ok(device) => device,
+            Err(e) => {
+                warn!("Device auto-recovery failed: {e}");
+                return Err(error);
+            }
+        };
+
+        // (Re-)Initialize if necessary
+        if was_initialized {
+            match self.initialize_retry(false) {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    warn!("Device auto-recovery initialization failed: {e}");
+                    Err(error)
+                }
+            }
+        } else {
+            Ok(())
+        }
     }
 }

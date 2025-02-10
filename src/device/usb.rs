@@ -38,6 +38,7 @@ pub struct UsbDevice {
     info: Option<DeviceInfo>,
     usb_info: Option<UsbInfo>,
     sw_debug_info: SwDebugInfo,
+    initialized: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +120,7 @@ impl Device for UsbDevice {
             info: None,
             usb_info: None,
             sw_debug_info: SwDebugInfo::default(),
+            initialized: false,
         })
     }
 
@@ -128,7 +130,12 @@ impl Device for UsbDevice {
         let (info, usb_info) = self.initialize_device()?;
         self.info = Some(info);
         self.usb_info = Some(usb_info);
+        self.initialized = true;
         Ok(())
+    }
+
+    fn initialized(&mut self) -> bool {
+        self.initialized
     }
 
     fn info(&mut self) -> Option<DeviceInfo> {
@@ -505,16 +512,16 @@ impl UsbDevice {
                         if let Ok(num) = serial.parse::<u8>() {
                             if serial_num.is_none() {
                                 debug!("Was looking for any serial number, found {num}");
-                                return Ok((device, handle))
+                                return Ok((device, handle));
                             } else if Some(num) == serial_num {
                                 debug!("Found device with matching serial number {num}");
                                 return Ok((device, handle));
-                            }
-                            else {
+                            } else {
                                 found_serial_nums.push(num);
                                 debug!(
-                                    "Device serial number {num} didn't match requested {}", serial_num.unwrap(),
-                                );    
+                                    "Device serial number {num} didn't match requested {}",
+                                    serial_num.unwrap(),
+                                );
                             }
                         }
                     }
@@ -906,7 +913,7 @@ mod tests {
                     vid: XUM1541_VID,
                     pid: XUM1541_PID,
                     actual: _,
-                    expected: 99
+                    expected: Some(99)
                 }
             })
         ));

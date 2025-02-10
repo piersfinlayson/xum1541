@@ -249,7 +249,7 @@ pub use crate::constants::{
 
 /// Bus types
 pub use crate::bus::DEFAULT_TIMEOUT as BUS_DEFAULT_TIMEOUT;
-pub use crate::bus::{Bus, BusBuilder};
+pub use crate::bus::{Bus, BusBuilder, BusRecoveryType};
 
 pub use crate::device::remoteusb::{
     RemoteUsbDevice, RemoteUsbDeviceConfig, RemoteUsbInfo, UsbDeviceServer,

@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2025-??-??
+### Added
+- Auto-recovery function to try and reconnect to the device if the connection fails
+
 ## [0.3.1] - 2025-02-08
 ### Added
 - examples/serial.rs

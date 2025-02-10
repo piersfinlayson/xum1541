@@ -1,5 +1,5 @@
 use crate::device::remoteusb::{DEFAULT_ADDR, DEFAULT_PORT};
-use crate::{Bus, BUS_DEFAULT_TIMEOUT};
+use crate::{Bus, BusRecoveryType, BUS_DEFAULT_TIMEOUT};
 use crate::{DeviceAccessError, Error};
 use crate::{DeviceConfig, DeviceType, RemoteUsbDeviceConfig, UsbDeviceConfig};
 
@@ -57,6 +57,7 @@ pub struct BusBuilder {
     serial_num: Option<u8>,
     remote_addr: Option<SocketAddr>,
     timeout: Option<Duration>,
+    recovery_type: BusRecoveryType,
 }
 
 #[allow(dead_code)]
@@ -80,6 +81,7 @@ impl BusBuilder {
             serial_num: None,
             remote_addr: None,
             timeout: None,
+            recovery_type: BusRecoveryType::default(),
         }
     }
 
@@ -108,7 +110,9 @@ impl BusBuilder {
 
         // Create Bus
         let timeout = self.timeout.unwrap_or(BUS_DEFAULT_TIMEOUT);
-        Ok(Bus::new(device, timeout))
+        let mut bus = Bus::new(device, timeout);
+        bus.set_recovery_type(self.recovery_type.clone());
+        Ok(bus)
     }
 
     /// Sets the XUM-1541 device serial number to use.
@@ -138,6 +142,12 @@ impl BusBuilder {
     /// If not set, defaults to [`BUS_DEFAULT_TIMEOUT`] when building
     pub fn timeout(&mut self, duration: Duration) -> &mut Self {
         self.timeout = Some(duration);
+        self
+    }
+
+    /// Sets the Bus recovery type
+    pub fn recovery(&mut self, recovery_type: BusRecoveryType) -> &mut Self {
+        self.recovery_type = recovery_type;
         self
     }
 }

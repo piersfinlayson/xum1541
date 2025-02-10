@@ -44,6 +44,13 @@ impl DeviceType {
         }
     }
 
+    pub fn initialized(&mut self) -> bool {
+        match self {
+            Self::Usb(device) => device.initialized(),
+            Self::RemoteUsb(device) => device.initialized(),
+        }
+    }
+
     pub fn info(&mut self) -> Option<DeviceInfo> {
         match self {
             Self::Usb(device) => device.info(),
@@ -177,6 +184,9 @@ pub trait Device: std::fmt::Debug + Send + Clone {
     /// * `Ok(())` - Successfully initialized device
     /// * `Err(Error)` - If device initialization fails
     fn init(&mut self) -> Result<(), Error>;
+
+    /// Returns whether the device has been initialized
+    fn initialized(&mut self) -> bool;
 
     /// Returns the [`DeviceInfo`] for this device as an
     /// [`Option<&DeviceInfo>`].

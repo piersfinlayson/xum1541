@@ -224,10 +224,17 @@ pub struct DeviceClient {
     device_info: Option<DeviceInfo>,
     remote_usb_info: RemoteUsbInfo,
     sw_debug_info: SwDebugInfo,
+    initialized: bool,
 }
 pub use DeviceClient as RemoteUsbDevice;
 
 impl DeviceClient {
+    /// Return the remote address.  Useful for re-creating the device if
+    /// required for recovery purposes
+    pub fn get_remote_addr(&self) -> Option<SocketAddr> {
+        self.device_config.remote_addr
+    }
+
     fn connect(config: Option<RemoteUsbDeviceConfig>) -> Result<Self, Error> {
         trace!("DeviceClient::connect");
         let remote_addr = match &config {
@@ -262,6 +269,7 @@ impl DeviceClient {
             device_info: None,
             remote_usb_info: remote_usb_info,
             sw_debug_info: SwDebugInfo::default(),
+            initialized: false,
         })
     }
 
@@ -398,6 +406,10 @@ impl Device for DeviceClient {
             },
             rsp => Err(Self::unexpected_response("Init", rsp)),
         }
+    }
+
+    fn initialized(&mut self) -> bool {
+        self.initialized
     }
 
     fn info(&mut self) -> Option<DeviceInfo> {

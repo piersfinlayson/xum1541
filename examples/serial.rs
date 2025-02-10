@@ -1,8 +1,8 @@
+use clap::Parser;
 /// serial.rs
 ///
 /// Connects to a specific xum1541 serial number
 use xum1541::{BusBuilder, Error};
-use clap::Parser;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -19,7 +19,10 @@ fn main() -> Result<(), Error> {
     // Initialize the bus
     bus.initialize()?;
 
-    println!("Successfully connected to device with serial number {}", args.serial);
+    println!(
+        "Successfully connected to device with serial number {}",
+        args.serial
+    );
 
     Ok(())
 }

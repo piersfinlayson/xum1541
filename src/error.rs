@@ -1,10 +1,11 @@
 //! Error objects for the xum1541 crate
+use crate::constants::{XUM1541_PID, XUM1541_VID};
 use libc::{EACCES, EINVAL, EIO, ENODEV, ENOENT, ETIMEDOUT};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Error type for the xum1541 crate
-#[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Error, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Error {
     /// Errors accessing the USB device
     /// Note that permission problems are explicitly handled in the DeviceAccess
@@ -34,7 +35,7 @@ pub enum Error {
 
 /// Used to differentiate between different types of problems accessing the
 /// XUM1541 device
-#[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Error, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DeviceAccess {
     #[error("The library is not connected to an XUM1541")]
     NoDevice,
@@ -65,7 +66,7 @@ pub enum DeviceAccess {
     NetworkConnection { message: String, errno: i32 },
 }
 
-#[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Error, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Communication {
     /// Hit a failure issuing an ioctl to the device
     #[error("Failed to issue ioctl to device")]
@@ -104,7 +105,7 @@ pub enum Communication {
     Unknown { message: String, errno: i32 },
 }
 
-#[derive(Debug, Error, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Error, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SerializableUsbError {
     #[error("{message}")]
     UsbError { message: String },
@@ -169,9 +170,25 @@ impl From<rusb::Error> for Internal {
 // Map rusb::Error to Error
 impl From<rusb::Error> for Error {
     fn from(err: rusb::Error) -> Self {
-        Self::Usb(SerializableUsbError::UsbError {
-            message: err.to_string(),
-        })
+        // Maps specific rusb errors to DeviceAccess errors
+        // Where there isn't a specific mapping, use SerializableUsbError
+        match err {
+            rusb::Error::NoDevice => Error::DeviceAccess {
+                kind: DeviceAccess::NoDevice,
+            },
+            rusb::Error::NotFound => Error::DeviceAccess {
+                kind: DeviceAccess::NotFound {
+                    vid: XUM1541_VID,
+                    pid: XUM1541_PID,
+                },
+            },
+            rusb::Error::Access => Error::DeviceAccess {
+                kind: DeviceAccess::Permission,
+            },
+            _ => Error::Usb(SerializableUsbError::UsbError {
+                message: err.to_string(),
+            }),
+        }
     }
 }
 
