@@ -9,7 +9,7 @@ use thiserror::Error;
 pub enum Error {
     /// Errors accessing the USB device
     /// Note that permission problems are explicitly handled in the DeviceAccess
-    #[error("USB error while attempting to commuicate with the XUM1541: {0}")]
+    #[error("USB error while attempting to communicate with the XUM1541: {0}")]
     Usb(SerializableUsbError),
 
     /// Failure in initializing the XUM1541 device

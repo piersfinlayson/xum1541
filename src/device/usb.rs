@@ -4,6 +4,7 @@ use crate::constants::{
     DEFAULT_USB_LOOP_SLEEP, DEFAULT_USB_RESET_SLEEP, DEFAULT_WRITE_TIMEOUT, DEV_INFO_SIZE, IO_BUSY,
     IO_ERROR, IO_READY, MAX_XFER_SIZE, MIN_FW_VERSION, PROTO_CBM, PROTO_MASK, READ,
     STATUS_BUF_SIZE, STATUS_DOING_RESET, WRITE, XUM1541_PID, XUM1541_VID,
+    PRODUCT_STRINGS,
 };
 use crate::device::SwDebugInfo;
 use crate::Ioctl;
@@ -130,6 +131,12 @@ impl Device for UsbDevice {
         let (info, usb_info) = self.initialize_device()?;
         self.info = Some(info);
         self.usb_info = Some(usb_info);
+
+        // An init can cause the xum1541 to stall its endpoints - if a reset
+        // was required.  So, we need to check and clear the stall if
+        // necessary
+        //self.check_and_clear_stall()?;
+
         self.initialized = true;
         Ok(())
     }
@@ -174,7 +181,7 @@ impl Device for UsbDevice {
 
         // Class-specific request, device as recipient, with IN direction
         const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
-            | constants::LIBUSB_RECIPIENT_ENDPOINT
+            | constants::LIBUSB_RECIPIENT_DEVICE
             | constants::LIBUSB_ENDPOINT_IN;
 
         // Perform control transfer and return number of bytes read
@@ -201,7 +208,7 @@ impl Device for UsbDevice {
         );
         self.sw_debug_info.increment_api_call();
         const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
-            | constants::LIBUSB_RECIPIENT_ENDPOINT
+            | constants::LIBUSB_RECIPIENT_DEVICE
             | constants::LIBUSB_ENDPOINT_OUT;
 
         // Send control transfer
@@ -252,6 +259,7 @@ impl Device for UsbDevice {
         let cmd_buf = [WRITE, mode, (size & 0xff) as u8, ((size >> 8) & 0xff) as u8];
 
         {
+            trace!("Write bulk to endpoint {BULK_OUT_ENDPOINT}, cmd_buf {cmd_buf:?}");
             self.handle
                 .lock()
                 .write_bulk(BULK_OUT_ENDPOINT, &cmd_buf, DEFAULT_WRITE_TIMEOUT)?;
@@ -266,6 +274,7 @@ impl Device for UsbDevice {
             let chunk = &data_slice[..chunk_size];
 
             let written = {
+                trace!("Write bulk data length: {}", chunk.len());
                 self.handle
                     .lock()
                     .write_bulk(BULK_OUT_ENDPOINT, chunk, DEFAULT_WRITE_TIMEOUT)?
@@ -294,6 +303,7 @@ impl Device for UsbDevice {
                 .into())
             }
         } else {
+            trace!("Write data succeeded {}", bytes_written);
             Ok(bytes_written)
         }
     }
@@ -523,6 +533,8 @@ impl UsbDevice {
                                     serial_num.unwrap(),
                                 );
                             }
+                        } else {
+                            warn!("Failed to parse serial number {serial}");
                         }
                     }
                     Err(e) => {
@@ -585,7 +597,7 @@ impl UsbDevice {
         //   permissions)
         // - Seems to avoid various USB errors talking to the device if it's
         //   been left in a dodgy state.
-        self.hard_reset_pre_init()?;
+        //self.hard_reset_pre_init()?;
 
         let (device_info, usb_info) = self.verify_and_setup_device()?;
         let mut info = self.read_basic_info(&device_info)?;
@@ -686,9 +698,9 @@ impl UsbDevice {
 
         // Verify product string
         debug!("Product string: {}", product);
-        if !product.contains("xum1541") {
+        if !PRODUCT_STRINGS.iter().any(|s| product.contains(s)) {
             return Err(Error::Init {
-                message: format!("Device product string {} didn't contain xum1541", product),
+                message: format!("Device product string {} didn't contain an expected value", product),
             });
         }
 
@@ -724,6 +736,9 @@ impl UsbDevice {
         self.handle
             .lock()
             .read_product_string_ascii(device_desc)
+            .inspect_err(|e|
+                warn!("Hit error trying to read xum1541 product string: {e:?}")
+            )
             .map_err(|_| Error::Init {
                 message: "Couldn't read device product string".into(),
             })
@@ -760,6 +775,7 @@ impl UsbDevice {
             info_buf
         );
 
+        // Now get the device info
         let info = DeviceInfo {
             product: initial_info.product.clone(),
             manufacturer: initial_info.manufacturer.clone(),
@@ -871,6 +887,56 @@ impl UsbDevice {
             _ => unreachable!(),
         };
         debug!("{} {}", description, debug_str);
+    }
+
+    #[allow(dead_code)]
+    fn check_and_clear_stall(&mut self) -> Result<(), Error> {
+        trace!("UsbDevice::check_and_clear_stall");
+        let handle = self.handle.lock();
+        for ep in [BULK_IN_ENDPOINT, BULK_OUT_ENDPOINT].iter() {
+            // Direction is always IN for GET_STATUS, even for OUT endpoint
+            let direction = constants::LIBUSB_ENDPOINT_IN;
+            let mut status = [0u8; 2];
+            let request_type = constants::LIBUSB_REQUEST_TYPE_STANDARD |
+            constants::LIBUSB_RECIPIENT_ENDPOINT |
+            direction;
+            trace!("Read control request ep: 0x{ep:02x} type: 0x{:02x}", request_type);
+            handle.read_control(
+                    request_type,
+                    constants::LIBUSB_REQUEST_GET_STATUS,
+                    0, // no specific value needed for GET_STATUS
+                    *ep as u16,
+                    &mut status,
+                    DEFAULT_CONTROL_TIMEOUT,
+                )
+                .map_err(Error::from)?;
+
+            let is_stalled = (status[0] & 1) != 0;
+
+            if is_stalled {
+                info!("Endpoint 0x{ep:02x} is stalled - clearing");
+            } else {
+                debug!("Endpoint 0x{ep:02x} is not stalled - clearing anyway", ep = ep);
+            }
+
+            // Direction is always OUT for CLEAR_FEATURE, even for IN
+            // endpoint
+            let direction = constants::LIBUSB_ENDPOINT_OUT;
+            let request_type = constants::LIBUSB_REQUEST_TYPE_STANDARD |
+            constants::LIBUSB_RECIPIENT_ENDPOINT |
+            direction;
+            trace!("Write control request 0x{:02x}", request_type);
+            handle.write_control(
+                    request_type,
+                    constants::LIBUSB_REQUEST_CLEAR_FEATURE,
+                    0, // ENDPOINT_HALT feature selector
+                    *ep as u16,
+                    &[],
+                    DEFAULT_CONTROL_TIMEOUT,
+            )
+            .map_err(Error::from)?;
+        }
+        Ok(())
     }
 }
 

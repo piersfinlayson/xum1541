@@ -2,8 +2,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [0.3.2] - 2025-??-??
+
+XXXX - Have changed vid/pid and disabled device reset
+
 ### Added
 - Auto-recovery function to try and reconnect to the device if the connection fails
+
+### Changed
+- Should be using interface for read_ and write_control commands (endpoint works on xum1541, but not pico1541 due to tusb stack, so changing)
 
 ## [0.3.1] - 2025-02-08
 ### Added

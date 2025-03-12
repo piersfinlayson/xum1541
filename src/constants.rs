@@ -5,10 +5,22 @@ use std::time::Duration;
 
 /// XUM1541 device info
 
-/// XUM1541 USB vendor ID
+/// PICO1541 USB vendor and product IDs
+pub const PICO1541_VID: u16 = 0x1209;
+pub const PICO1541_PID: u16 = 0x0f0f;
+
+/// XUM1541 USB vendor and product IDs
 pub const XUM1541_VID: u16 = 0x16d0;
-/// XUM1541 USB product ID
 pub const XUM1541_PID: u16 = 0x0504;
+//pub const XUM1541_VID: u16 = 0x16d0;
+//pub const XUM1541_PID: u16 = 0x0504;
+
+pub const PRODUCT_STRINGS: [&str; 3] = [
+    "xum1541",
+    "pico1541",
+    "tinyusb vendor example",
+];
+
 /// Latest known XUM1541 firmware version
 pub const CUR_FW_VERSION: u8 = 8;
 /// Minimum version of XUM1541 firmware supported by this crate

@@ -638,12 +638,12 @@ impl Bus {
                             f(&mut self.device)
                         }
                         _ => {
-                            warn!("Device appears to be disconnected - not retrying due to error type ({e})");
+                            warn!("Fatal device error - not retrying due to error type ({e})");
                             Err(e)
                         }
                     },
                     e => {
-                        warn!("Device appears to be disconnected - not retrying due to error type ({e})");
+                        warn!("Fatal device error - not retrying due to error type ({e})");
                         Err(e)
                     }
                 }
