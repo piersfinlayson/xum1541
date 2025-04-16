@@ -20,7 +20,7 @@ fn main() -> Result<(), Error> {
 
     // Print it out (this should be the drive status)
     println!(
-        "Retrieved data from drive: {}",
+        "Retrieved data from drive:\n\n{}",
         std::str::from_utf8(&data).unwrap()
     );
 
