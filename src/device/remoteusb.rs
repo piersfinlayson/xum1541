@@ -31,19 +31,10 @@ fn default_socket_addr() -> SocketAddr {
     SocketAddr::new(IpAddr::from_str(DEFAULT_ADDR).unwrap(), DEFAULT_PORT)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RemoteUsbDeviceConfig {
     pub serial_num: Option<u8>,
     pub remote_addr: Option<SocketAddr>,
-}
-
-impl Default for RemoteUsbDeviceConfig {
-    fn default() -> Self {
-        Self {
-            serial_num: None,
-            remote_addr: None,
-        }
-    }
 }
 
 impl From<UsbDeviceConfig> for RemoteUsbDeviceConfig {
@@ -66,11 +57,11 @@ impl From<RemoteUsbDeviceConfig> for UsbDeviceConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteUsbInfo {
-    /// Standard UsbInfo retrieved over the network from UsbDevice
+    /// Standard `UsbInfo` retrieved over the network from `UsbDevice`
     pub usb_info: Option<UsbInfo>,
 
     /// Remote specific info, containing data about the connection to
-    /// UsbDevice
+    /// `UsbDevice`
     pub bind_addr: SocketAddr,
 }
 
@@ -88,14 +79,14 @@ impl SpecificDeviceInfo for RemoteUsbInfo {
 struct UsbConfigWrapper(Option<UsbDeviceConfig>);
 impl From<UsbConfigWrapper> for Option<RemoteUsbDeviceConfig> {
     fn from(wrapper: UsbConfigWrapper) -> Self {
-        wrapper.0.map(|c| c.into())
+        wrapper.0.map(std::convert::Into::into)
     }
 }
 
 struct RemoteUsbConfigWrapper(Option<RemoteUsbDeviceConfig>);
 impl From<RemoteUsbConfigWrapper> for Option<UsbDeviceConfig> {
     fn from(config: RemoteUsbConfigWrapper) -> Self {
-        config.0.map(|c| c.into())
+        config.0.map(std::convert::Into::into)
     }
 }
 
@@ -134,7 +125,7 @@ enum RemoteDeviceRequest {
 impl std::fmt::Display for RemoteDeviceRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RemoteDeviceRequest::New(config) => write!(f, "New({:?})", config),
+            RemoteDeviceRequest::New(config) => write!(f, "New({config:?})"),
             RemoteDeviceRequest::Init => write!(f, "Init"),
             RemoteDeviceRequest::HardResetAndReInit => write!(f, "HardResetAndReInit"),
             RemoteDeviceRequest::ReadControl {
@@ -144,8 +135,7 @@ impl std::fmt::Display for RemoteDeviceRequest {
             } => {
                 write!(
                     f,
-                    "ReadControl {{ request: {}, value: {}, buffer_size: {} }}",
-                    request, value, buffer_size
+                    "ReadControl {{ request: {request}, value: {value}, buffer_size: {buffer_size} }}",
                 )
             }
             RemoteDeviceRequest::WriteControl {
@@ -155,19 +145,14 @@ impl std::fmt::Display for RemoteDeviceRequest {
             } => {
                 write!(
                     f,
-                    "WriteControl {{ request: {}, value: {}, buffer: {:?} }}",
-                    request, value, buffer
+                    "WriteControl {{ request: {request}, value: {value}, buffer: {buffer:?} }}",
                 )
             }
             RemoteDeviceRequest::WriteData { mode, data } => {
-                write!(f, "WriteData {{ mode: {}, data: {:?} }}", mode, data)
+                write!(f, "WriteData {{ mode: {mode}, data: {data:?} }}")
             }
             RemoteDeviceRequest::ReadData { mode, buffer_size } => {
-                write!(
-                    f,
-                    "ReadData {{ mode: {}, buffer_size: {} }}",
-                    mode, buffer_size
-                )
+                write!(f, "ReadData {{ mode: {mode}, buffer_size: {buffer_size} }}",)
             }
             RemoteDeviceRequest::WaitForStatus => write!(f, "WaitForStatus"),
             RemoteDeviceRequest::Ioctl {
@@ -177,8 +162,7 @@ impl std::fmt::Display for RemoteDeviceRequest {
             } => {
                 write!(
                     f,
-                    "Ioctl {{ ioctl: {:?}, address: {}, secondary_address: {} }}",
-                    ioctl, address, secondary_address
+                    "Ioctl {{ ioctl: {ioctl:?}, address: {address}, secondary_address: {secondary_address} }}",
                 )
             }
         }
@@ -201,17 +185,17 @@ enum RemoteDeviceResponse {
 impl std::fmt::Display for RemoteDeviceResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RemoteDeviceResponse::New(result) => write!(f, "New({:?})", result),
-            RemoteDeviceResponse::Init(result) => write!(f, "Init({:?})", result),
+            RemoteDeviceResponse::New(result) => write!(f, "New({result:?})"),
+            RemoteDeviceResponse::Init(result) => write!(f, "Init({result:?})"),
             RemoteDeviceResponse::HardResetAndReInit(result) => {
-                write!(f, "HardResetAndReInit({:?})", result)
+                write!(f, "HardResetAndReInit({result:?})")
             }
-            RemoteDeviceResponse::ReadControl(result) => write!(f, "ReadControl({:?})", result),
-            RemoteDeviceResponse::WriteControl(result) => write!(f, "WriteControl({:?})", result),
-            RemoteDeviceResponse::WriteData(result) => write!(f, "WriteData({:?})", result),
-            RemoteDeviceResponse::ReadData(result) => write!(f, "ReadData({:?})", result),
-            RemoteDeviceResponse::WaitForStatus(result) => write!(f, "WaitForStatus({:?})", result),
-            RemoteDeviceResponse::Ioctl(result) => write!(f, "Ioctl({:?})", result),
+            RemoteDeviceResponse::ReadControl(result) => write!(f, "ReadControl({result:?})"),
+            RemoteDeviceResponse::WriteControl(result) => write!(f, "WriteControl({result:?})"),
+            RemoteDeviceResponse::WriteData(result) => write!(f, "WriteData({result:?})"),
+            RemoteDeviceResponse::ReadData(result) => write!(f, "ReadData({result:?})"),
+            RemoteDeviceResponse::WaitForStatus(result) => write!(f, "WaitForStatus({result:?})"),
+            RemoteDeviceResponse::Ioctl(result) => write!(f, "Ioctl({result:?})"),
         }
     }
 }
@@ -231,6 +215,7 @@ pub use DeviceClient as RemoteUsbDevice;
 impl DeviceClient {
     /// Return the remote address.  Useful for re-creating the device if
     /// required for recovery purposes
+    #[must_use]
     pub fn get_remote_addr(&self) -> Option<SocketAddr> {
         self.device_config.remote_addr
     }
@@ -244,14 +229,14 @@ impl DeviceClient {
 
         let stream = TcpStream::connect(remote_addr).map_err(|e| Error::DeviceAccess {
             kind: DeviceAccessError::NetworkConnection {
-                message: format!("Failed to connect: {}", e),
+                message: format!("Failed to connect: {e}"),
                 errno: e.raw_os_error().unwrap_or(libc::EIO),
             },
         })?;
 
         let local_addr = stream.local_addr().map_err(|e| Error::DeviceAccess {
             kind: DeviceAccessError::NetworkConnection {
-                message: format!("Failed to get local address: {}", e),
+                message: format!("Failed to get local address: {e}"),
                 errno: e.raw_os_error().unwrap_or(libc::EIO),
             },
         })?;
@@ -267,7 +252,7 @@ impl DeviceClient {
                 remote_addr: Some(remote_addr),
             },
             device_info: None,
-            remote_usb_info: remote_usb_info,
+            remote_usb_info,
             sw_debug_info: SwDebugInfo::default(),
             initialized: false,
         })
@@ -288,14 +273,14 @@ impl DeviceClient {
 
     fn send_request(
         &mut self,
-        request: RemoteDeviceRequest,
+        request: &RemoteDeviceRequest,
     ) -> Result<RemoteDeviceResponse, Error> {
         trace!("DeviceClient::send_request");
         let stream = self.stream_or_err()?;
 
         let data = serialize(&request).map_err(|e| Error::DeviceAccess {
             kind: DeviceAccessError::NetworkConnection {
-                message: format!("Serialization error: {}", e),
+                message: format!("Serialization error: {e}"),
                 errno: libc::EIO, // Serialization errors don't have OS error codes
             },
         })?;
@@ -308,7 +293,7 @@ impl DeviceClient {
                 .write_all(&(data.len() as u64).to_le_bytes())
                 .map_err(|e| Error::DeviceAccess {
                     kind: DeviceAccessError::NetworkConnection {
-                        message: format!("Failed to send message length: {}", e),
+                        message: format!("Failed to send message length: {e}"),
                         errno: e.raw_os_error().unwrap_or(libc::EIO),
                     },
                 })?;
@@ -316,7 +301,7 @@ impl DeviceClient {
             // Send data
             guard.write_all(&data).map_err(|e| Error::DeviceAccess {
                 kind: DeviceAccessError::NetworkConnection {
-                    message: format!("Failed to send message: {}", e),
+                    message: format!("Failed to send message: {e}"),
                     errno: e.raw_os_error().unwrap_or(libc::EIO),
                 },
             })?;
@@ -327,10 +312,11 @@ impl DeviceClient {
                 .read_exact(&mut len_buf)
                 .map_err(|e| Error::DeviceAccess {
                     kind: DeviceAccessError::NetworkConnection {
-                        message: format!("Failed to read response length: {}", e),
+                        message: format!("Failed to read response length: {e}"),
                         errno: e.raw_os_error().unwrap_or(libc::EIO),
                     },
                 })?;
+            #[allow(clippy::cast_possible_truncation)]
             let len = u64::from_le_bytes(len_buf) as usize;
 
             // Read response data
@@ -339,7 +325,7 @@ impl DeviceClient {
                 .read_exact(&mut response_data)
                 .map_err(|e| Error::DeviceAccess {
                     kind: DeviceAccessError::NetworkConnection {
-                        message: format!("Failed to read response: {}", e),
+                        message: format!("Failed to read response: {e}"),
                         errno: e.raw_os_error().unwrap_or(libc::EIO),
                     },
                 })?;
@@ -349,17 +335,17 @@ impl DeviceClient {
 
         deserialize(&response_data).map_err(|e| Error::DeviceAccess {
             kind: DeviceAccessError::NetworkConnection {
-                message: format!("Failed to deserialize response: {}", e),
+                message: format!("Failed to deserialize response: {e}"),
                 errno: libc::EIO, // Deserialization errors don't have OS error codes
             },
         })
     }
 
-    fn unexpected_response(request: &str, rsp: RemoteDeviceResponse) -> Error {
+    fn unexpected_response(request: &str, rsp: &RemoteDeviceResponse) -> Error {
         trace!("DeviceClient::unexpected_response");
         Error::Communication {
             kind: CommunicationError::Remote {
-                message: format!("Unexpected response for {}: {}", request, rsp),
+                message: format!("Unexpected response for {request}: {rsp}"),
                 errno: libc::EIO,
             },
         }
@@ -378,7 +364,7 @@ impl Device for DeviceClient {
             context: None,
             serial_num: client.device_config.serial_num,
         };
-        match client.send_request(RemoteDeviceRequest::New(
+        match client.send_request(&RemoteDeviceRequest::New(
             UsbConfigWrapper(Some(usb_config)).into(),
         ))? {
             RemoteDeviceResponse::New(result) => match result {
@@ -388,14 +374,14 @@ impl Device for DeviceClient {
                 }
                 Err(e) => Err(e),
             },
-            rsp => Err(Self::unexpected_response("New", rsp)),
+            rsp => Err(Self::unexpected_response("New", &rsp)),
         }
     }
 
     fn init(&mut self) -> Result<(), Error> {
         trace!("RemoteUsbDevice::init");
         self.sw_debug_info.increment_api_call();
-        match self.send_request(RemoteDeviceRequest::Init)? {
+        match self.send_request(&RemoteDeviceRequest::Init)? {
             RemoteDeviceResponse::Init(result) => match result {
                 Ok((device_info, usb_info)) => {
                     self.device_info = Some(device_info);
@@ -404,7 +390,7 @@ impl Device for DeviceClient {
                 }
                 Err(e) => Err(e),
             },
-            rsp => Err(Self::unexpected_response("Init", rsp)),
+            rsp => Err(Self::unexpected_response("Init", &rsp)),
         }
     }
 
@@ -430,16 +416,16 @@ impl Device for DeviceClient {
     fn hard_reset_and_re_init(&mut self) -> Result<(), Error> {
         trace!("RemoteUsbDevice::hard_reset_and_re_init");
         self.sw_debug_info.increment_api_call();
-        match self.send_request(RemoteDeviceRequest::HardResetAndReInit)? {
+        match self.send_request(&RemoteDeviceRequest::HardResetAndReInit)? {
             RemoteDeviceResponse::HardResetAndReInit(result) => result,
-            rsp => Err(Self::unexpected_response("HardResetAndReInit", rsp)),
+            rsp => Err(Self::unexpected_response("HardResetAndReInit", &rsp)),
         }
     }
 
     fn read_control(&mut self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize, Error> {
         trace!("RemoteUsbDevice::read_control");
         self.sw_debug_info.increment_api_call();
-        match self.send_request(RemoteDeviceRequest::ReadControl {
+        match self.send_request(&RemoteDeviceRequest::ReadControl {
             request,
             value,
             buffer_size: buffer.len(),
@@ -449,39 +435,39 @@ impl Device for DeviceClient {
                 Ok(len)
             }
             RemoteDeviceResponse::ReadControl(Err(e)) => Err(e),
-            rsp => Err(Self::unexpected_response("ReadControl", rsp)),
+            rsp => Err(Self::unexpected_response("ReadControl", &rsp)),
         }
     }
 
     fn write_control(&mut self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Error> {
         trace!("RemoteUsbDevice::write_control");
         self.sw_debug_info.increment_api_call();
-        match self.send_request(RemoteDeviceRequest::WriteControl {
+        match self.send_request(&RemoteDeviceRequest::WriteControl {
             request,
             value,
             buffer: buffer.to_vec(),
         })? {
             RemoteDeviceResponse::WriteControl(result) => result,
-            rsp => Err(Self::unexpected_response("WriteControl", rsp)),
+            rsp => Err(Self::unexpected_response("WriteControl", &rsp)),
         }
     }
 
     fn write_data(&mut self, mode: u8, data: &[u8]) -> Result<usize, Error> {
         trace!("RemoteUsbDevice::write_data");
         self.sw_debug_info.increment_api_call();
-        match self.send_request(RemoteDeviceRequest::WriteData {
+        match self.send_request(&RemoteDeviceRequest::WriteData {
             mode,
             data: data.to_vec(),
         })? {
             RemoteDeviceResponse::WriteData(result) => result,
-            rsp => Err(Self::unexpected_response("WriteData", rsp)),
+            rsp => Err(Self::unexpected_response("WriteData", &rsp)),
         }
     }
 
     fn read_data(&mut self, mode: u8, buffer: &mut [u8]) -> Result<usize, Error> {
         trace!("RemoteUsbDevice::read_data");
         self.sw_debug_info.increment_api_call();
-        match self.send_request(RemoteDeviceRequest::ReadData {
+        match self.send_request(&RemoteDeviceRequest::ReadData {
             mode,
             buffer_size: buffer.len(),
         })? {
@@ -490,16 +476,16 @@ impl Device for DeviceClient {
                 Ok(len)
             }
             RemoteDeviceResponse::ReadData(Err(e)) => Err(e),
-            rsp => Err(Self::unexpected_response("ReadData", rsp)),
+            rsp => Err(Self::unexpected_response("ReadData", &rsp)),
         }
     }
 
     fn wait_for_status(&mut self) -> Result<u16, Error> {
         trace!("RemoteUsbDevice::wait_for_status");
         self.sw_debug_info.increment_api_call();
-        match self.send_request(RemoteDeviceRequest::WaitForStatus)? {
+        match self.send_request(&RemoteDeviceRequest::WaitForStatus)? {
             RemoteDeviceResponse::WaitForStatus(result) => result,
-            rsp => Err(Self::unexpected_response("WaitForStatus", rsp)),
+            rsp => Err(Self::unexpected_response("WaitForStatus", &rsp)),
         }
     }
 
@@ -511,13 +497,13 @@ impl Device for DeviceClient {
     ) -> Result<Option<u16>, Error> {
         trace!("RemoteUsbDevice::ioctl");
         self.sw_debug_info.increment_api_call();
-        match self.send_request(RemoteDeviceRequest::Ioctl {
+        match self.send_request(&RemoteDeviceRequest::Ioctl {
             ioctl,
             address,
             secondary_address,
         })? {
             RemoteDeviceResponse::Ioctl(result) => result,
-            rsp => Err(Self::unexpected_response("Ioctl", rsp)),
+            rsp => Err(Self::unexpected_response("Ioctl", &rsp)),
         }
     }
 }
@@ -529,12 +515,13 @@ pub struct UsbDeviceServer {
     listener: TcpListener,
 }
 
+#[allow(clippy::missing_errors_doc)]
 impl UsbDeviceServer {
     pub fn new(device: UsbDevice, bind_addr: SocketAddr) -> Result<Self, Error> {
         trace!("UsbDeviceServer::new");
         let listener = TcpListener::bind(bind_addr).map_err(|e| Error::Communication {
             kind: CommunicationError::Remote {
-                message: format!("Failed to bind server: {}", e),
+                message: format!("Failed to bind server: {e}"),
                 errno: libc::EIO,
             },
         })?;
@@ -555,33 +542,33 @@ impl UsbDeviceServer {
         trace!("UsbDeviceServer::serve");
         loop {
             match self.serve_one_connection() {
-                Ok(_) => continue,
-                Err(e) => match e {
-                    Error::Communication { kind } => match kind {
-                        CommunicationError::RemoteDisconnected { .. } => {
-                            continue;
-                        }
-                        _ => {
-                            error!("Hit unexpected error: {:?}", kind);
-                            break Err(Error::Communication { kind });
-                        }
-                    },
-                    _ => {
-                        error!("Hi unexpedcted error: {}", e);
-                        break Err(e);
+                Ok(()) => continue,
+                Err(e) => {
+                    if let Error::Communication {
+                        kind: CommunicationError::RemoteDisconnected { .. },
+                    } = e
+                    {
+                        continue;
+                    } else if let Error::Communication { kind } = e {
+                        error!("Hit unexpected error: {:?}", kind);
+                        break Err(Error::Communication { kind });
                     }
-                },
+
+                    error!("Hit unexpected error: {e}");
+                    break Err(e);
+                }
             }
         }
     }
 
     /// Runs the USB Device serving a single connection - then returns
+    #[allow(clippy::too_many_lines)]
     fn serve_one_connection(&mut self) -> Result<(), Error> {
         trace!("UsbDeviceServer::serve_one_connection");
         // Since this is 1:1, we only accept one connection
         let (mut stream, _) = self.listener.accept().map_err(|e| Error::Communication {
             kind: CommunicationError::Remote {
-                message: format!("Failed to accept connection: {}", e),
+                message: format!("Failed to accept connection: {e}"),
                 errno: libc::EIO,
             },
         })?;
@@ -590,7 +577,7 @@ impl UsbDeviceServer {
             .peer_addr()
             .inspect_err(|e| warn!("Failed to get remote peer address {}", e));
         let peer_addr_str = match peer_addr {
-            Ok(peer_addr) => format!("{}", peer_addr),
+            Ok(peer_addr) => format!("{peer_addr}"),
             _ => "Unknown".to_string(),
         };
         info!("Remote client {} connected", peer_addr_str);
@@ -600,7 +587,7 @@ impl UsbDeviceServer {
             // Read request length
             let mut len_buf = [0u8; 8];
             match stream.read_exact(&mut len_buf) {
-                Ok(_) => {}
+                Ok(()) => {}
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::ConnectionReset
                     | std::io::ErrorKind::ConnectionAborted
@@ -637,6 +624,7 @@ impl UsbDeviceServer {
                     }
                 },
             };
+            #[allow(clippy::cast_possible_truncation)]
             let len = u64::from_le_bytes(len_buf) as usize;
 
             // Read request data
@@ -645,7 +633,7 @@ impl UsbDeviceServer {
                 .read_exact(&mut request_data)
                 .map_err(|e| Error::Communication {
                     kind: CommunicationError::Remote {
-                        message: format!("Failed to read message: {}", e),
+                        message: format!("Failed to read message: {e}"),
                         errno: libc::EIO,
                     },
                 })?;
@@ -653,7 +641,7 @@ impl UsbDeviceServer {
             let request: RemoteDeviceRequest =
                 deserialize(&request_data).map_err(|e| Error::Communication {
                     kind: CommunicationError::Remote {
-                        message: format!("Failed to deserialize request: {}", e),
+                        message: format!("Failed to deserialize request: {e}"),
                         errno: libc::EIO,
                     },
                 })?;
@@ -667,7 +655,7 @@ impl UsbDeviceServer {
                     // device.init() (if it succeeds) always sets these both
                     // to Some, so we're OK to unwrap here
                     let new_rsp = match rsp {
-                        Ok(_) => Ok((
+                        Ok(()) => Ok((
                             self.device.info().unwrap(),
                             self.device.specific_info().unwrap(),
                         )),
@@ -726,7 +714,7 @@ impl UsbDeviceServer {
 
             let response_data = serialize(&response).map_err(|e| Error::Communication {
                 kind: CommunicationError::Remote {
-                    message: format!("Failed to serialize response: {}", e),
+                    message: format!("Failed to serialize response: {e}"),
                     errno: libc::EIO,
                 },
             })?;
@@ -735,7 +723,7 @@ impl UsbDeviceServer {
                 .write_all(&(response_data.len() as u64).to_le_bytes())
                 .map_err(|e| Error::Communication {
                     kind: CommunicationError::Remote {
-                        message: format!("Failed to send response length: {}", e),
+                        message: format!("Failed to send response length: {e}"),
                         errno: libc::EIO,
                     },
                 })?;
@@ -743,7 +731,7 @@ impl UsbDeviceServer {
                 .write_all(&response_data)
                 .map_err(|e| Error::Communication {
                     kind: CommunicationError::Remote {
-                        message: format!("Failed to send response: {}", e),
+                        message: format!("Failed to send response: {e}"),
                         errno: libc::EIO,
                     },
                 })?;

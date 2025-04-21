@@ -10,7 +10,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::str::FromStr;
 use std::time::Duration;
 
-/// A builder pattern for creating [`Bus`] instances using a UsbDevice and
+/// A builder pattern for creating [`Bus`] instances using a `UsbDevice` and
 /// custom configuration.
 ///
 /// Allows setting optional parameters like serial number, timeout, and USB context
@@ -60,22 +60,17 @@ pub struct BusBuilder {
     recovery_type: BusRecoveryType,
 }
 
-#[allow(dead_code)]
-impl BusBuilder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates a new [`BusBuilder`] instance with default values.
-    ///
-    /// All fields are initialized to None and can be set using the builder methods.
-    ///
-    /// # Returns
-    /// * [`BusBuilder`] - new builder instance with default values
-    ///
-    /// # Example
-    /// See [`BusBuilder`] documentation
-    pub fn default() -> Self {
+/// Creates a new [`BusBuilder`] instance with default values.
+///
+/// All fields are initialized to None and can be set using the builder methods.
+///
+/// # Returns
+/// * [`BusBuilder`] - new builder instance with default values
+///
+/// # Example
+/// See [`BusBuilder`] documentation
+impl Default for BusBuilder {
+    fn default() -> Self {
         BusBuilder {
             usb_context: None,
             serial_num: None,
@@ -83,6 +78,14 @@ impl BusBuilder {
             timeout: None,
             recovery_type: BusRecoveryType::default(),
         }
+    }
+}
+
+#[allow(dead_code)]
+impl BusBuilder {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Builds and returns a new [`Bus`] instance using the configured parameters.
@@ -94,18 +97,18 @@ impl BusBuilder {
     /// # Example
     /// See [`BusBuilder`]
     ///
-    /// # Notes:
+    /// # Notes
     /// Uses default values for any parameters that weren't set
+    ///
+    /// # Errors
+    /// Currently does not return `Err`
     pub fn build(&mut self) -> Result<Bus, Error> {
-        let device = match self.remote_addr {
-            Some(_) => {
-                trace!("Creating remote USB device");
-                self.create_remote_device()
-            }
-            None => {
-                trace!("Creating local USB device");
-                self.create_usb_device()
-            }
+        let device = if self.remote_addr.is_some() {
+            trace!("Creating remote USB device");
+            self.create_remote_device()
+        } else {
+            trace!("Creating local USB device");
+            self.create_usb_device()
         }?;
 
         // Create Bus
@@ -156,8 +159,8 @@ impl BusBuilder {
 impl BusBuilder {
     /// Sets a custom USB context for device communication.
     ///
-    /// This allows setting the USB debug log level via context.set_log_level()
-    /// using rusb::LogLevel.
+    /// This allows setting the USB debug log level via
+    /// `context.set_log_level()` using `rusb::LogLevel`.
     ///
     /// # Args:
     /// * context - the [`rusb::Context`] to use
@@ -179,7 +182,9 @@ impl BusBuilder {
     /// ```
     ///
     /// # Note:
-    /// If not set, a new default [`rusb::Context`] will be created with LogLevel::Info
+    /// If not set, a new default [`rusb::Context`] will be created with
+    /// `LogLevel::Info`
+    #[must_use]
     pub fn context(mut self, context: Context) -> Self {
         self.usb_context = Some(context);
         self
@@ -209,18 +214,25 @@ impl BusBuilder {
     ///
     ///
     /// # Returns
-    /// * `Result<&mut Self, Error>` - builder instance for method chaining or error
+    /// * `Result<&mut Self, Error>` - builder instance for method chaining or
+    ///   error
+    ///
+    /// # Errors
+    /// None currently
     pub fn remote_default(&mut self) -> Result<&mut Self, Error> {
-        self.remote_str(&format!("{}:{}", DEFAULT_ADDR, DEFAULT_PORT))
+        self.remote_str(&format!("{DEFAULT_ADDR}:{DEFAULT_PORT}"))
     }
 
-    /// Sets the remote device address using an already parsed SocketAddr.
+    /// Sets the remote device address using an already parsed `SocketAddr`.
     ///
     /// # Args:
     /// * addr - the socket address (IPv4 or IPv6) to connect to
     ///
     /// # Returns
     /// * `&mut Self` - builder instance for method chaining
+    ///
+    /// # Errors
+    /// `Error::Init` - if the USB context is already configured
     pub fn remote(&mut self, addr: SocketAddr) -> Result<&mut Self, Error> {
         if self.usb_context.is_none() {
             self.remote_addr = Some(addr);
@@ -238,17 +250,21 @@ impl BusBuilder {
     /// # Args:
     /// * addr - String in format `HOST:PORT` where:
     ///   - IPv4 addresses: `192.168.1.1:9999`
-    ///   - IPv6 addresses: must use square brackets `\[2001:db8::1\]:9999``
+    ///   - IPv6 addresses: must use square brackets `\[2001:db8::1\]:9999`
     ///   - Hostnames: `example.com:9999`
     ///
     /// # Returns
-    /// * `Result<&mut Self, Error>` - builder instance for method chaining or error
+    /// * `Result<&mut Self, Error>` - builder instance for method chaining or
+    ///   error
+    ///
+    /// # Errors
+    /// `Error::DeviceAccess` - if the address cannot be resolved
     pub fn remote_str(&mut self, addr: &str) -> Result<&mut Self, Error> {
         let addr = addr
             .to_socket_addrs()
             .map_err(|e| Error::DeviceAccess {
                 kind: DeviceAccessError::AddressResolution {
-                    message: format!("Failed to resolve address: {}", e),
+                    message: format!("Failed to resolve address: {e}"),
                     errno: e.raw_os_error().unwrap_or(libc::EINVAL),
                 },
             })?
@@ -256,7 +272,7 @@ impl BusBuilder {
             .ok_or_else(|| Error::DeviceAccess {
                 kind: DeviceAccessError::AddressResolution {
                     message: "Could not resolve address".to_string(),
-                    errno: libc::EAI_NONAME as i32,
+                    errno: libc::EAI_NONAME,
                 },
             })?;
         self.remote(addr)
@@ -270,10 +286,13 @@ impl BusBuilder {
     ///
     /// # Returns
     /// * `Result<&mut Self, Error>` - builder instance for method chaining or error
+    ///
+    /// # Errors
+    /// `Error::DeviceAccess` - if the address cannot be resolved
     pub fn remote_ipv4_str(&mut self, addr: &str, port: u16) -> Result<&mut Self, Error> {
         let ip = Ipv4Addr::from_str(addr).map_err(|e| Error::DeviceAccess {
             kind: DeviceAccessError::AddressResolution {
-                message: format!("Invalid IPv4 address: {}", e),
+                message: format!("Invalid IPv4 address: {e}"),
                 errno: libc::EINVAL,
             },
         })?;
@@ -283,15 +302,18 @@ impl BusBuilder {
     /// Sets the remote device IPv6 address using a string representation.
     ///
     /// # Args:
-    /// * addr - String in IPv6 format (e.g. "::1" or "2001:db8::1")
+    /// * addr - String in IPv6 format (e.g. `::1` or `2001:db8::1`)
     /// * port - Port number
     ///
     /// # Returns
     /// * `Result<&mut Self, Error>` - builder instance for method chaining or error
+    ///
+    /// # Errors
+    /// `Error::DeviceAccess` - if the address cannot be resolved
     pub fn remote_ipv6_str(&mut self, addr: &str, port: u16) -> Result<&mut Self, Error> {
         let ip = Ipv6Addr::from_str(addr).map_err(|e| Error::DeviceAccess {
             kind: DeviceAccessError::AddressResolution {
-                message: format!("Invalid IPv6 address: {}", e),
+                message: format!("Invalid IPv6 address: {e}"),
                 errno: libc::EINVAL,
             },
         })?;

@@ -3,7 +3,7 @@ use rusb::constants::{LIBUSB_ENDPOINT_IN, LIBUSB_ENDPOINT_OUT};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// XUM1541 device info
+// XUM1541 device info
 
 /// PICO1541 USB vendor and product IDs
 pub const PICO1541_VID: u16 = 0x1209;
@@ -15,18 +15,14 @@ pub const XUM1541_PID: u16 = 0x0504;
 //pub const XUM1541_VID: u16 = 0x16d0;
 //pub const XUM1541_PID: u16 = 0x0504;
 
-pub const PRODUCT_STRINGS: [&str; 3] = [
-    "xum1541",
-    "pico1541",
-    "tinyusb vendor example",
-];
+pub const PRODUCT_STRINGS: [&str; 3] = ["xum1541", "pico1541", "tinyusb vendor example"];
 
 /// Latest known XUM1541 firmware version
 pub const CUR_FW_VERSION: u8 = 8;
 /// Minimum version of XUM1541 firmware supported by this crate
 pub const MIN_FW_VERSION: u8 = 7;
 
-/// Device protocol commands
+// Device protocol commands
 
 /// Used with [`crate::constants::PROTO_WRITE_ATN`] and [`crate::constants::PROTO_CBM`] to enter a device into Talk mode
 pub const PROTO_WRITE_TALK: u8 = 1 << 0;
@@ -53,7 +49,7 @@ pub const PROTO_NIB_SRQ: u8 = 8 << 4;
 /// 1570/1571 serial nibbler commands
 pub const PROTO_NIB_SRQ_COMMAND: u8 = 9 << 4;
 
-/// Timeouts
+// Timeouts
 
 /// Used to wait for the USB device to respond to a read message
 pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(5);
@@ -109,7 +105,7 @@ pub const CTRL_GCCVER: u8 = 7;
 /// Retrieve libc version command (firmware >= 8)
 pub const CTRL_LIBCVER: u8 = 8;
 
-/// Device status flags - retrieve at Device initialization time
+// Device status flags - retrieve at Device initialization time
 
 /// Device was set down uncleeanly and should be reset
 pub const STATUS_DOING_RESET: u8 = 0x01;
@@ -118,7 +114,7 @@ pub const STATUS_IEEE488_PRESENT: u8 = 0x10;
 /// A 153x tape device is connected
 pub const STATUS_TAPE_PRESENT: u8 = 0x20;
 
-/// Device capability flags
+// Device capability flags
 
 /// Device supports CBM commands
 pub const CAP_CBM: u8 = 0x01;
@@ -131,7 +127,7 @@ pub const CAP_IEEE488: u8 = 0x08;
 /// Device supports 153x tape devices
 pub const CAP_TAP: u8 = 0x10; // 153x tape support
 
-/// Minimum and maximum disk drive numbers
+// Minimum and maximum disk drive numbers
 
 /// Minimum (and default) Commodore disk drive device number.  Devices lower
 /// tha 8 are reserved for other device types, such as printers and tape
@@ -142,7 +138,7 @@ pub const DEVICE_MIN_NUM: u8 = 8;
 /// number which can be set, with software, on the 1571
 pub const DEVICE_MAX_NUM: u8 = 30;
 
-/// Minimum and maximum disk drive channel numbers
+// Minimum and maximum disk drive channel numbers
 
 /// Minimum disk drive channel number
 pub const DRIVE_MIN_CHANNEL: u8 = 0;
@@ -193,11 +189,13 @@ pub enum Ioctl {
 
 impl Ioctl {
     /// Whether the Ioctl is an asyncronous one
+    #[must_use]
     pub fn is_async(&self) -> bool {
         *self == Self::IecWait
     }
 
     /// Whether the Ioctl is a syncronous one
+    #[must_use]
     pub fn is_sync(&self) -> bool {
         !self.is_async()
     }

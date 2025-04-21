@@ -11,9 +11,12 @@ use serde::{Deserialize, Serialize};
 pub use remoteusb::RemoteUsbDevice;
 pub use usb::{UsbDevice, UsbInfo};
 
-use crate::{constants::*, RemoteUsbInfo};
+use crate::constants::{
+    CAP_CBM, CAP_IEEE488, CAP_NIB, CAP_NIB_SRQ, CAP_TAP, STATUS_DOING_RESET,
+    STATUS_IEEE488_PRESENT, STATUS_TAPE_PRESENT,
+};
 use crate::{Error, Ioctl};
-use crate::{RemoteUsbDeviceConfig, UsbDeviceConfig};
+use crate::{RemoteUsbDeviceConfig, RemoteUsbInfo, UsbDeviceConfig};
 
 #[derive(Debug, Clone)]
 pub enum DeviceType {
@@ -27,6 +30,7 @@ pub enum DeviceConfig {
     RemoteUsb(RemoteUsbDeviceConfig),
 }
 
+#[allow(clippy::missing_errors_doc)]
 impl DeviceType {
     pub fn new(config: DeviceConfig) -> Result<Self, Error> {
         match config {
@@ -142,6 +146,7 @@ impl DeviceType {
 pub trait Config: std::fmt::Debug {}
 
 /// The core Device trait, which allows Device to be mocked out for testing
+#[allow(clippy::missing_errors_doc)]
 pub trait Device: std::fmt::Debug + Send + Clone {
     type Config;
     type SpecificDeviceInfo;
@@ -195,7 +200,7 @@ pub trait Device: std::fmt::Debug + Send + Clone {
     fn info(&mut self) -> Option<DeviceInfo>;
 
     /// Returns [`SpecificDeviceInfo`] for this device, as an
-    /// ['Option<SpecificDeviceInfo']
+    /// [Option<`SpecificDeviceInfo`]
     ///
     /// Will be None if the device hasn't been initialized
     fn specific_info(&mut self) -> Option<Self::SpecificDeviceInfo>;
@@ -219,7 +224,7 @@ pub trait Device: std::fmt::Debug + Send + Clone {
     /// Sends a control message and reads the response
     ///
     /// # Arguments
-    /// * `request` - The request_type byte
+    /// * `request` - The `request_type` byte
     /// * `value` - The 2 byte request value
     /// * `buffer` - A buffer which will be filled in with the read data
     ///
@@ -236,7 +241,7 @@ pub trait Device: std::fmt::Debug + Send + Clone {
     /// was issued, as this would likely hang.
     ///
     /// # Arguments
-    /// * `request` - The request_type byte
+    /// * `request` - The `request_type` byte
     /// * `value` - The 2 byte request value
     /// * `buffer` - A buffer with any additional data to send
     ///
@@ -251,7 +256,7 @@ pub trait Device: std::fmt::Debug + Send + Clone {
     /// success, even if all the data could not be written.
     ///
     /// # Argumemts
-    /// * `mode` - Mode, one of xum1541::PROTO_*, see [`crate::constants`]
+    /// * `mode` - Mode, one of `xum1541::PROTO_*`, see [`crate::constants`]
     /// * `data` - Data to write
     ///
     /// # Returns
@@ -266,7 +271,7 @@ pub trait Device: std::fmt::Debug + Send + Clone {
     /// stop if buffer is filled up.
     ///
     /// # Argumemts
-    /// * `mode` - Mode, one of xum1541::PROTO_*
+    /// * `mode` - Mode, one of `xum1541::PROTO_*`
     /// * `data` - Data to write
     ///
     /// # Returns
@@ -290,7 +295,7 @@ pub trait Device: std::fmt::Debug + Send + Clone {
     /// after sending, except where the Ioctl is asyncronous
     ///
     /// # Arguments
-    /// * `ioctl` - The request_type of type [`crate::constants::Ioctl`]
+    /// * `ioctl` - The `request_type` of type [`crate::constants::Ioctl`]
     /// * `address` - The address to target with this ioctl.  May be 0.
     /// * `secondary_address` - The secondary to target with this ioctl. May be 0.
     ///
@@ -306,17 +311,11 @@ pub trait Device: std::fmt::Debug + Send + Clone {
 }
 
 /// Debug information about this Device software object
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SwDebugInfo {
     /// Number of API calls made to this object that led to this object
     /// querying the device
     pub api_calls: u64,
-}
-
-impl Default for SwDebugInfo {
-    fn default() -> Self {
-        SwDebugInfo { api_calls: 0 }
-    }
 }
 
 impl SwDebugInfo {
@@ -325,8 +324,8 @@ impl SwDebugInfo {
     }
 }
 
-/// DeviceInfo contains information read from the XUM1541 device.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// `DeviceInfo` contains information read from the XUM1541 device.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DeviceInfo {
     /// Product [`String`] from the USB device
     pub product: String,
@@ -344,22 +343,8 @@ pub struct DeviceInfo {
     pub debug_info: Option<DeviceDebugInfo>,
 }
 
-impl Default for DeviceInfo {
-    fn default() -> Self {
-        DeviceInfo {
-            product: String::new(),
-            manufacturer: None,
-            serial_number: None,
-            firmware_version: 0,
-            capabilities: 0,
-            status: 0,
-            debug_info: None,
-        }
-    }
-}
-
 impl DeviceInfo {
-    /// Prints DeviceInfo to stdout in a human-readable format
+    /// Prints `DeviceInfo` to stdout in a human-readable format
     pub fn print_capabilities(&self) {
         let capability_flags = [
             (CAP_CBM, "CBM commands"),
@@ -371,7 +356,7 @@ impl DeviceInfo {
 
         for (flag, description) in capability_flags {
             if self.capabilities & flag != 0 {
-                println!("  - {}", description);
+                println!("  - {description}");
             }
         }
 
@@ -390,7 +375,7 @@ impl DeviceInfo {
 
         for (flag, description) in status_flags {
             if self.status & flag != 0 {
-                println!("  - {}", description);
+                println!("  - {description}");
             }
         }
 
@@ -404,23 +389,23 @@ impl DeviceInfo {
     pub fn print_debug(&self) {
         if let Some(debug_info) = &self.debug_info {
             if let Some(rev) = &debug_info.git_rev {
-                println!("  - Git revision: {}", rev);
+                println!("  - Git revision: {rev}");
             }
             if let Some(gcc) = &debug_info.gcc_ver {
-                println!("  - GCC version: {}", gcc);
+                println!("  - GCC version: {gcc}");
             }
             if let Some(libc) = &debug_info.libc_ver {
-                println!("  - libc version: {}", libc);
+                println!("  - libc version: {libc}");
             }
         } else {
-            println!("  - no debug information")
+            println!("  - no debug information");
         }
     }
 }
 
-/// DeviceDebugInfo contains some additional data from XUM1541 supporting
+/// `DeviceDebugInf`o contains some additional data from XUM1541 supporting
 /// firmware version 8 and onwards.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DeviceDebugInfo {
     /// Git revision of the code the device firmware was built from
     pub git_rev: Option<String>,
@@ -428,16 +413,6 @@ pub struct DeviceDebugInfo {
     pub gcc_ver: Option<String>,
     /// AVR libc version the device firmware was built with
     pub libc_ver: Option<String>,
-}
-
-impl Default for DeviceDebugInfo {
-    fn default() -> Self {
-        DeviceDebugInfo {
-            git_rev: None,
-            gcc_ver: None,
-            libc_ver: None,
-        }
-    }
 }
 
 /// A trait to allow for specific device information to be accessed
