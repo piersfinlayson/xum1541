@@ -1,7 +1,7 @@
 //! # xum1541
 //!
 //! This crate provides a Rust interface for communicating with Commodore disk drives via the XUM1541
-//! USB adapter (also known as the ZoomFloppy). It enables modern computers to interact with vintage
+//! USB adapter (also known as the `ZoomFloppy`). It enables modern computers to interact with vintage
 //! Commodore hardware through a clean, safe, and idiomatic Rust API.
 //!
 //! ## Overview
@@ -74,18 +74,18 @@
 //!
 //! ## Key Types
 //!
-//! ### DeviceChannel
+//! ### `DeviceChannel`
 //!
 //! Represents a combination of device number and channel (secondary address) on the Commodore bus.
 //!
-//! ### BusMode
+//! ### `BusMode`
 //!
 //! Tracks the current state of the bus:
 //! - Idle
 //! - Talking (a specific device talking using a specific channel)
 //! - Listening (a specific device listening using a specific channel)
 //!
-//! ### DeviceInfo
+//! ### `DeviceInfo`
 //!
 //! Contains information about the XUM1541 device:
 //! - Firmware version
@@ -137,7 +137,7 @@
 //!
 //! See
 //! * [`examples/readme.rs`](examples/readme.rs) - A very simple app which queries a drive's status.  This is also included below.
-//! * [`examples/basic.rs`](examples/basic.rs) - A more complex example which enables logging (run with `RUST_LOG=info`` for example) queries the device's capabilities and drive status.
+//! * [`examples/basic.rs`](examples/basic.rs) - A more complex example which enables logging (run with `RUST_LOG=info` for example) queries the device's capabilities and drive status.
 //!
 //! ```rust,no_run
 //! use xum1541::{BusBuilder, DeviceChannel, Error};
@@ -225,9 +225,8 @@
 //!
 //! This library is licensed under the GNU General Public License Version 3 (GPLv3).
 //! ## Acknowledgments
-//! - Original [OpenCBM](https://github.com/OpenCbm/OpenCbm) project and xum1541 plugin developers.  OpenCbm is licensed under the GPLv2
-//! - ZoomFloppy hardware developers
-//! - Commodore community
+//! - Original [OpenCBM](https://github.com/OpenCbm/OpenCbm) project and xum1541 plugin developers.  `OpenCbm` is licensed under the GPLv2
+//! - `ZoomFloppy` hardware developers
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
 
@@ -269,7 +268,10 @@ pub struct DeviceChannel {
 }
 
 impl DeviceChannel {
-    /// Create a new DeviceChannel object
+    /// Create a new `DeviceChannel` object
+    ///
+    /// # Errors
+    /// Failure to validate device/channel
     pub fn new(device: u8, channel: u8) -> Result<Self, Error> {
         match Self::validate(device, channel) {
             Ok(()) => Ok(Self { device, channel }),
@@ -278,11 +280,13 @@ impl DeviceChannel {
     }
 
     // Returns the device number
+    #[must_use]
     pub const fn device(&self) -> u8 {
         self.device
     }
 
     // Returns the channel number
+    #[must_use]
     pub const fn channel(&self) -> u8 {
         self.channel
     }
@@ -290,6 +294,7 @@ impl DeviceChannel {
     fn validate(device: u8, channel: u8) -> Result<(), Error> {
         trace!("DeviceChannel::validate: device {device} and channel {channel}");
 
+        #[allow(clippy::absurd_extreme_comparisons)]
         if device < DEVICE_MIN_NUM {
             trace!("Device {device} below minimum {DEVICE_MIN_NUM}");
             Err(Error::Args {
@@ -320,19 +325,19 @@ impl DeviceChannel {
         }
     }
 
-    fn as_talk_bytes(&self) -> Vec<u8> {
+    fn as_talk_bytes(self) -> Vec<u8> {
         vec![0x40 | self.device, 0x60 | self.channel]
     }
 
-    fn as_listen_bytes(&self) -> Vec<u8> {
+    fn as_listen_bytes(self) -> Vec<u8> {
         vec![0x20 | self.device, 0x60 | self.channel]
     }
 
-    fn as_open_bytes(&self) -> Vec<u8> {
+    fn as_open_bytes(self) -> Vec<u8> {
         vec![0x20 | self.device, 0xf0 | self.channel]
     }
 
-    fn as_close_bytes(&self) -> Vec<u8> {
+    fn as_close_bytes(self) -> Vec<u8> {
         vec![0x20 | self.device, 0xe0 | self.channel]
     }
 }

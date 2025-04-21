@@ -2,9 +2,8 @@ use crate::constants::{
     BULK_IN_ENDPOINT, BULK_OUT_ENDPOINT, CTRL_GCCVER, CTRL_GITREV, CTRL_INIT, CTRL_LIBCVER,
     CTRL_RESET, CTRL_SHUTDOWN, CUR_FW_VERSION, DEFAULT_CONTROL_TIMEOUT, DEFAULT_READ_TIMEOUT,
     DEFAULT_USB_LOOP_SLEEP, DEFAULT_USB_RESET_SLEEP, DEFAULT_WRITE_TIMEOUT, DEV_INFO_SIZE, IO_BUSY,
-    IO_ERROR, IO_READY, MAX_XFER_SIZE, MIN_FW_VERSION, PROTO_CBM, PROTO_MASK, READ,
-    STATUS_BUF_SIZE, STATUS_DOING_RESET, WRITE, XUM1541_PID, XUM1541_VID,
-    PRODUCT_STRINGS,
+    IO_ERROR, IO_READY, MAX_XFER_SIZE, MIN_FW_VERSION, PRODUCT_STRINGS, PROTO_CBM, PROTO_MASK,
+    READ, STATUS_BUF_SIZE, STATUS_DOING_RESET, WRITE, XUM1541_PID, XUM1541_VID,
 };
 use crate::device::SwDebugInfo;
 use crate::Ioctl;
@@ -42,7 +41,7 @@ pub struct UsbDevice {
     initialized: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct UsbDeviceConfig {
     /// The [`rusb::Context`] to use for this device.  May be None to use
     /// default context.
@@ -52,15 +51,6 @@ pub struct UsbDeviceConfig {
     /// detected device of the correct type will be used.  If set to 0, only
     /// a device with a zero serial number will be matched.
     pub serial_num: Option<u8>,
-}
-
-impl Default for UsbDeviceConfig {
-    fn default() -> Self {
-        Self {
-            context: None,
-            serial_num: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,16 +163,16 @@ impl Device for UsbDevice {
     }
 
     fn read_control(&mut self, request: u8, value: u16, buffer: &mut [u8]) -> Result<usize, Error> {
+        // Class-specific request, device as recipient, with IN direction
+        const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
+            | constants::LIBUSB_RECIPIENT_DEVICE
+            | constants::LIBUSB_ENDPOINT_IN;
+
         trace!(
             "Device::read_control request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
         );
         self.sw_debug_info.increment_api_call();
-
-        // Class-specific request, device as recipient, with IN direction
-        const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
-            | constants::LIBUSB_RECIPIENT_DEVICE
-            | constants::LIBUSB_ENDPOINT_IN;
 
         // Perform control transfer and return number of bytes read
         let index = 0; // default control endpoint
@@ -197,19 +187,20 @@ impl Device for UsbDevice {
                     buffer,
                     DEFAULT_CONTROL_TIMEOUT,
                 )
-                .map_err(|e| e.into())
+                .map_err(std::convert::Into::into)
         }
     }
 
     fn write_control(&mut self, request: u8, value: u16, buffer: &[u8]) -> Result<(), Error> {
+        const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
+            | constants::LIBUSB_RECIPIENT_DEVICE
+            | constants::LIBUSB_ENDPOINT_OUT;
+
         trace!(
             "Device::write_control request 0x{request:02x} value 0x{value:02x} buffer.len() {}",
             buffer.len()
         );
         self.sw_debug_info.increment_api_call();
-        const REQUEST_TYPE: u8 = constants::LIBUSB_REQUEST_TYPE_CLASS
-            | constants::LIBUSB_RECIPIENT_DEVICE
-            | constants::LIBUSB_ENDPOINT_OUT;
 
         // Send control transfer
         let index = 0; // default control endpoint
@@ -232,8 +223,7 @@ impl Device for UsbDevice {
             if status == 0 {
                 return Err(Error::Communication {
                     kind: CommunicationError::StatusValue { value: status },
-                }
-                .into());
+                });
             }
         }
 
@@ -256,6 +246,7 @@ impl Device for UsbDevice {
         }
 
         // Send the write command with 4-byte command buffer
+        #[allow(clippy::cast_possible_truncation)]
         let cmd_buf = [WRITE, mode, (size & 0xff) as u8, ((size >> 8) & 0xff) as u8];
 
         {
@@ -267,7 +258,7 @@ impl Device for UsbDevice {
 
         // Write the actual data in chunks
         let mut bytes_written = 0;
-        let mut data_slice = &data.as_ref()[..size];
+        let mut data_slice = &data[..size];
 
         while bytes_written < size {
             let chunk_size = min(MAX_XFER_SIZE, size - bytes_written);
@@ -299,8 +290,7 @@ impl Device for UsbDevice {
             } else {
                 Err(Error::Communication {
                     kind: CommunicationError::StatusValue { value: status },
-                }
-                .into())
+                })
             }
         } else {
             trace!("Write data succeeded {}", bytes_written);
@@ -329,6 +319,7 @@ impl Device for UsbDevice {
         }
 
         // Send read command with 4-byte command buffer
+        #[allow(clippy::cast_possible_truncation)]
         let cmd_buf = [READ, mode, (size & 0xff) as u8, ((size >> 8) & 0xff) as u8];
 
         {
@@ -341,7 +332,7 @@ impl Device for UsbDevice {
         let mut bytes_read = 0;
         while bytes_read < size {
             let chunk_size = std::cmp::min(MAX_XFER_SIZE, size - bytes_read);
-            let chunk = &mut buffer.as_mut()[bytes_read..bytes_read + chunk_size];
+            let chunk = &mut buffer[bytes_read..bytes_read + chunk_size];
 
             let read = {
                 self.handle
@@ -401,7 +392,7 @@ impl Device for UsbDevice {
                         }
                         IO_BUSY => {
                             trace!("Device busy");
-                            let _ = sleep(DEFAULT_USB_LOOP_SLEEP);
+                            sleep(DEFAULT_USB_LOOP_SLEEP);
                             continue;
                         }
                         IO_ERROR => {
@@ -440,7 +431,7 @@ impl Device for UsbDevice {
                             });
                         }
                         debug!("Timeout waiting for device status {}", e);
-                        let _ = sleep(DEFAULT_USB_LOOP_SLEEP);
+                        sleep(DEFAULT_USB_LOOP_SLEEP);
                         timeouts += 1;
                         continue;
                     }
@@ -475,7 +466,6 @@ impl Device for UsbDevice {
                 trace!(
                     "Successfully sent ioctl {ioctl} to address {address} secondary_address {secondary_address}",
                 );
-                ()
             }
             Err(e) => {
                 warn!("Failed to send ioctl {ioctl} to address {address} secondary_address {secondary_address}",);
@@ -526,13 +516,13 @@ impl UsbDevice {
                             } else if Some(num) == serial_num {
                                 debug!("Found device with matching serial number {num}");
                                 return Ok((device, handle));
-                            } else {
-                                found_serial_nums.push(num);
-                                debug!(
-                                    "Device serial number {num} didn't match requested {}",
-                                    serial_num.unwrap(),
-                                );
                             }
+
+                            found_serial_nums.push(num);
+                            debug!(
+                                "Device serial number {num} didn't match requested {}",
+                                serial_num.unwrap(),
+                            );
                         } else {
                             warn!("Failed to parse serial number {serial}");
                         }
@@ -551,7 +541,15 @@ impl UsbDevice {
             }
         }
 
-        let err = if found_serial_nums.len() > 0 {
+        let err = if found_serial_nums.is_empty() {
+            info!("No suitable XUM1541 device found");
+            Error::DeviceAccess {
+                kind: DeviceAccessError::NotFound {
+                    vid: XUM1541_VID,
+                    pid: XUM1541_PID,
+                },
+            }
+        } else {
             info!("No matching XUM1541 device found {serial_num:?}, but found non-matching serial(s) {found_serial_nums:?}");
             Error::DeviceAccess {
                 kind: DeviceAccessError::SerialMismatch {
@@ -559,14 +557,6 @@ impl UsbDevice {
                     pid: XUM1541_PID,
                     actual: found_serial_nums,
                     expected: serial_num,
-                },
-            }
-        } else {
-            info!("No suitable XUM1541 device found");
-            Error::DeviceAccess {
-                kind: DeviceAccessError::NotFound {
-                    vid: XUM1541_VID,
-                    pid: XUM1541_PID,
                 },
             }
         };
@@ -619,9 +609,9 @@ impl UsbDevice {
                         warn!("Failed to read debug info from device: {}", error);
                         return Err(error);
                     }
-                    e => {
+                    e @ InternalError::DeviceInfo { .. } => {
                         // Hit some sort of processing error - we'll treat this as a non-failure mode
-                        info!("Failed to read debug info from device: {}", e);
+                        info!("Failed to read debug info from device: {e}");
                         None
                     }
                 },
@@ -638,7 +628,7 @@ impl UsbDevice {
 
         let result = { self.handle.lock().clear_halt(BULK_IN_ENDPOINT) };
         match result {
-            Ok(_) => (),
+            Ok(()) => (),
             Err(e) => {
                 warn!("USB clear halt request failed for in endpoint: {}", e);
                 return Err(e.into());
@@ -647,7 +637,7 @@ impl UsbDevice {
 
         let result = { self.handle.lock().clear_halt(BULK_OUT_ENDPOINT) };
         match result {
-            Ok(_) => Ok(()),
+            Ok(()) => Ok(()),
             Err(e) => {
                 warn!("USB clear halt request failed for out endpoint: {}", e);
                 Err(e.into())
@@ -657,14 +647,14 @@ impl UsbDevice {
 
     fn get_status(buf: &[u8]) -> u8 {
         trace!("UsbDevice::get_status buf.len() {}", buf.len());
-        assert!(buf.len() >= 1);
+        assert!(!buf.is_empty());
         buf[0]
     }
 
     fn get_status_val(buf: &[u8]) -> u16 {
         trace!("UsbDevice::get_status_val buf.len() {}", buf.len());
         assert!(buf.len() >= 3);
-        u16::from(buf[2]) << 8 | u16::from(buf[1])
+        (u16::from(buf[2]) << 8) | u16::from(buf[1])
     }
 
     /// Verify device identity and set up initial configuration
@@ -700,7 +690,9 @@ impl UsbDevice {
         debug!("Product string: {}", product);
         if !PRODUCT_STRINGS.iter().any(|s| product.contains(s)) {
             return Err(Error::Init {
-                message: format!("Device product string {} didn't contain an expected value", product),
+                message: format!(
+                    "Device product string {product} didn't contain an expected value",
+                ),
             });
         }
 
@@ -718,7 +710,7 @@ impl UsbDevice {
         let usb_info = UsbInfo {
             vendor_id: device_desc.vendor_id(),
             product_id: device_desc.product_id(),
-            bus_number: bus_number,
+            bus_number,
             device_address: address,
         };
 
@@ -736,9 +728,7 @@ impl UsbDevice {
         self.handle
             .lock()
             .read_product_string_ascii(device_desc)
-            .inspect_err(|e|
-                warn!("Hit error trying to read xum1541 product string: {e:?}")
-            )
+            .inspect_err(|e| warn!("Hit error trying to read xum1541 product string: {e:?}"))
             .map_err(|_| Error::Init {
                 message: "Couldn't read device product string".into(),
             })
@@ -767,7 +757,7 @@ impl UsbDevice {
     fn read_basic_info(&mut self, initial_info: &DeviceInfo) -> Result<DeviceInfo, Error> {
         trace!("UsbDevice::read_basic_info initial_info {initial_info:?}");
         let mut info_buf = [0u8; DEV_INFO_SIZE];
-        let len = self.read_control(CTRL_INIT as u8, 0, &mut info_buf)?;
+        let len = self.read_control(CTRL_INIT, 0, &mut info_buf)?;
 
         trace!(
             "Control transfer succeeded, got {} bytes: {:?}",
@@ -820,13 +810,13 @@ impl UsbDevice {
         for cmd in ver_cmds {
             match self.read_debug_command(cmd, &mut info_buf) {
                 Ok(debug_str) => {
-                    self.update_debug_info(&mut debug_info, cmd, debug_str);
+                    Self::update_debug_info(&mut debug_info, cmd, &debug_str);
                 }
                 Err(e) => match e {
                     InternalError::DeviceInfo { message } => {
                         debug!("No debug data for command {}: {} - ignoring", cmd, message);
                     }
-                    e => {
+                    e @ InternalError::PublicError { .. } => {
                         warn!("Failed to read debug info for command {}: {}", cmd, e);
                         return Err(e);
                     }
@@ -867,21 +857,21 @@ impl UsbDevice {
     }
 
     /// Update debug info structure with command results
-    fn update_debug_info(&self, debug_info: &mut DeviceDebugInfo, cmd: u8, debug_str: String) {
+    fn update_debug_info(debug_info: &mut DeviceDebugInfo, cmd: u8, debug_str: &str) {
         trace!(
             "Device::update_debug_info debug_info {debug_info:?} cmd {cmd} debug_str {debug_str}"
         );
         let description = match cmd {
             CTRL_GITREV => {
-                debug_info.git_rev = Some(debug_str.clone());
+                debug_info.git_rev = Some(debug_str.to_string());
                 "Firmware git revision:"
             }
             CTRL_GCCVER => {
-                debug_info.gcc_ver = Some(debug_str.clone());
+                debug_info.gcc_ver = Some(debug_str.to_string());
                 "Firmware compiled with avr-gcc version:"
             }
             CTRL_LIBCVER => {
-                debug_info.libc_ver = Some(debug_str.clone());
+                debug_info.libc_ver = Some(debug_str.to_string());
                 "Firmware using avr-libc version:"
             }
             _ => unreachable!(),
@@ -893,19 +883,23 @@ impl UsbDevice {
     fn check_and_clear_stall(&mut self) -> Result<(), Error> {
         trace!("UsbDevice::check_and_clear_stall");
         let handle = self.handle.lock();
-        for ep in [BULK_IN_ENDPOINT, BULK_OUT_ENDPOINT].iter() {
+        for ep in &[BULK_IN_ENDPOINT, BULK_OUT_ENDPOINT] {
             // Direction is always IN for GET_STATUS, even for OUT endpoint
             let direction = constants::LIBUSB_ENDPOINT_IN;
             let mut status = [0u8; 2];
-            let request_type = constants::LIBUSB_REQUEST_TYPE_STANDARD |
-            constants::LIBUSB_RECIPIENT_ENDPOINT |
-            direction;
-            trace!("Read control request ep: 0x{ep:02x} type: 0x{:02x}", request_type);
-            handle.read_control(
+            let request_type = constants::LIBUSB_REQUEST_TYPE_STANDARD
+                | constants::LIBUSB_RECIPIENT_ENDPOINT
+                | direction;
+            trace!(
+                "Read control request ep: 0x{ep:02x} type: 0x{:02x}",
+                request_type
+            );
+            handle
+                .read_control(
                     request_type,
                     constants::LIBUSB_REQUEST_GET_STATUS,
                     0, // no specific value needed for GET_STATUS
-                    *ep as u16,
+                    u16::from(*ep),
                     &mut status,
                     DEFAULT_CONTROL_TIMEOUT,
                 )
@@ -916,25 +910,29 @@ impl UsbDevice {
             if is_stalled {
                 info!("Endpoint 0x{ep:02x} is stalled - clearing");
             } else {
-                debug!("Endpoint 0x{ep:02x} is not stalled - clearing anyway", ep = ep);
+                debug!(
+                    "Endpoint 0x{ep:02x} is not stalled - clearing anyway",
+                    ep = ep
+                );
             }
 
             // Direction is always OUT for CLEAR_FEATURE, even for IN
             // endpoint
             let direction = constants::LIBUSB_ENDPOINT_OUT;
-            let request_type = constants::LIBUSB_REQUEST_TYPE_STANDARD |
-            constants::LIBUSB_RECIPIENT_ENDPOINT |
-            direction;
+            let request_type = constants::LIBUSB_REQUEST_TYPE_STANDARD
+                | constants::LIBUSB_RECIPIENT_ENDPOINT
+                | direction;
             trace!("Write control request 0x{:02x}", request_type);
-            handle.write_control(
+            handle
+                .write_control(
                     request_type,
                     constants::LIBUSB_REQUEST_CLEAR_FEATURE,
                     0, // ENDPOINT_HALT feature selector
-                    *ep as u16,
+                    u16::from(*ep),
                     &[],
                     DEFAULT_CONTROL_TIMEOUT,
-            )
-            .map_err(Error::from)?;
+                )
+                .map_err(Error::from)?;
         }
         Ok(())
     }

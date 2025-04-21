@@ -24,7 +24,6 @@
 use xum1541::device::remoteusb::DEFAULT_PORT;
 use xum1541::{Device, Error, UsbDevice, UsbDeviceServer};
 
-use env_logger;
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, warn};
 use std::net::{IpAddr, SocketAddr};
@@ -40,7 +39,7 @@ fn execute() -> Result<(), Error> {
         addr, DEFAULT_PORT
     );
     let ip_addr = IpAddr::from_str(addr).map_err(|e| Error::Args {
-        message: format!("Failed to parse address: {}", e),
+        message: format!("Failed to parse address: {e}"),
     })?;
     let bind_addr = SocketAddr::new(ip_addr, DEFAULT_PORT);
     let mut device = UsbDeviceServer::new(device, bind_addr)?;
@@ -57,9 +56,9 @@ fn main() {
     env_logger::builder().init();
 
     match execute() {
-        Ok(_) => std::process::exit(0),
+        Ok(()) => std::process::exit(0),
         Err(e) => {
-            error!("Error: {}", e);
+            error!("Error: {e}");
             std::process::exit(1);
         }
     }

@@ -1,13 +1,14 @@
+use std::env;
 /// talk.rs
 ///
 /// This is as basic talk example to retrieve whatever data from channel 15
 /// the drive wants to send us.
 use xum1541::{BusBuilder, DeviceChannel, Error};
-use std::env;
 
 fn main() -> Result<(), Error> {
     // Parse command line arguments for the channel number, default to 15 if not provided
-    let channel = env::args().nth(1)
+    let channel = env::args()
+        .nth(1)
         .and_then(|arg| arg.parse::<u8>().ok())
         .unwrap_or(15);
 

@@ -8,7 +8,7 @@ use thiserror::Error;
 #[derive(Debug, Error, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Error {
     /// Errors accessing the USB device
-    /// Note that permission problems are explicitly handled in the DeviceAccess
+    /// Note that permission problems are explicitly handled in the `DeviceAccess`
     #[error("USB error while attempting to communicate with the XUM1541: {0}")]
     Usb(SerializableUsbError),
 
@@ -24,7 +24,7 @@ pub enum Error {
     #[error("XUM1541 operation timed out after {dur:?}")]
     Timeout { dur: std::time::Duration },
 
-    /// DeviceAccess holds a variety errors relating to accessing the XUM1541
+    /// `DeviceAccess` holds a variety errors relating to accessing the XUM1541
     #[error("{kind}")]
     DeviceAccess { kind: DeviceAccess },
 
@@ -112,25 +112,25 @@ pub enum SerializableUsbError {
 }
 
 impl Error {
+    #[must_use]
     pub fn to_errno(&self) -> i32 {
+        #[allow(clippy::match_same_arms)]
         match self {
-            Error::Usb { .. } => EIO,
-            Error::Init { .. } => EIO,
+            Error::Usb { .. } | Error::Init { .. } => EIO,
             Error::Communication { kind } => match kind {
                 Communication::RemoteDisconnected { errno, .. } => *errno,
-                Communication::Remote { errno, .. } => *errno,
-                Communication::Unknown { errno, .. } => *errno,
+                Communication::Remote { errno, .. } | Communication::Unknown { errno, .. } => {
+                    *errno
+                }
                 _ => EIO,
             },
             Error::Timeout { .. } => ETIMEDOUT,
             Error::DeviceAccess { kind } => match kind {
-                DeviceAccess::NoDevice { .. } => ENODEV,
-                DeviceAccess::NotFound { .. } => ENOENT,
-                DeviceAccess::SerialMismatch { .. } => ENOENT,
-                DeviceAccess::FirmwareVersion { .. } => ENODEV,
+                DeviceAccess::NoDevice { .. } | DeviceAccess::FirmwareVersion { .. } => ENODEV,
+                DeviceAccess::NotFound { .. } | DeviceAccess::SerialMismatch { .. } => ENOENT,
                 DeviceAccess::Permission { .. } => EACCES,
-                DeviceAccess::AddressResolution { errno, .. } => *errno,
-                DeviceAccess::NetworkConnection { errno, .. } => *errno,
+                DeviceAccess::AddressResolution { errno, .. }
+                | DeviceAccess::NetworkConnection { errno, .. } => *errno,
             },
             Error::Args { .. } => EINVAL,
         }
@@ -158,7 +158,7 @@ impl From<Error> for Internal {
     }
 }
 
-/// Map rusb:Error to an Error, wrapped in an Internal::PublicError type
+/// Map rusb:Error to an Error, wrapped in an `Internal::PublicError` type
 impl From<rusb::Error> for Internal {
     fn from(error: rusb::Error) -> Self {
         Internal::PublicError {

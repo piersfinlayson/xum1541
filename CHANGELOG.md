@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 ## [0.3.2] - 2025-??-??
 
 XXXX - Have changed vid/pid and disabled device reset
+- Added Bus::listen_no_channel to instruct a device to listen without specifying a channel number.  Rather than sending 0x20|device followed by 0x60|channel, this just sends the first byte.  This is strictly allowed by IEEE-488 but not used (?) by Commodore devices.
 
 ### Added
 - Auto-recovery function to try and reconnect to the device if the connection fails

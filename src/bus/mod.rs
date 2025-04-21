@@ -22,9 +22,10 @@ pub use builder::BusBuilder;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Types of device failure recovery supported by the Bus
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum BusRecoveryType {
     /// Will not attempt to auto recover the device
+    #[default]
     Off,
 
     /// Will attempt to auto recover the device.  First it will try to create
@@ -35,12 +36,6 @@ pub enum BusRecoveryType {
     /// Will attempt to auto recover the device, but only if the serial number
     /// matches the original device
     Serial,
-}
-
-impl Default for BusRecoveryType {
-    fn default() -> Self {
-        BusRecoveryType::Off
-    }
 }
 
 /// The [`Bus`] struct is the main interface for accessing Commodore disk
@@ -92,6 +87,7 @@ impl Bus {
     /// // Now initialize both the Bus and Device simultaneously
     /// bus.initialize();
     /// ```
+    #[must_use]
     pub fn new(device: DeviceType, timeout: Duration) -> Self {
         trace!("Bus::new");
         Bus {
@@ -120,6 +116,9 @@ impl Bus {
     ///
     /// # Example
     /// See [`Bus::new`]
+    ///
+    /// # Errors
+    /// If device initialization fails.
     pub fn initialize(&mut self) -> Result<(), Error> {
         self.initialize_retry(true)
     }
@@ -129,6 +128,9 @@ impl Bus {
     /// # Returns
     /// * `Ok(())` - if successful
     /// * `Err(Error)` - if an error occurred
+    ///
+    /// # Errors
+    /// If command fails
     pub fn reset(&mut self) -> Result<(), Error> {
         trace!("Entered Bus::reset");
         self.mode = BusMode::Idle;
@@ -138,25 +140,48 @@ impl Bus {
     /// Instruct a drive to talk on the bus.
     ///
     /// # Args:
-    /// * dc: DeviceChannel - the device and channel to instruct to talk
+    /// * dc: `DeviceChannel` - the device and channel to instruct to talk
     ///
     /// # Returns
     /// * `Ok(())` - if successful
     /// * `Err(Error)` - if an error occurred
+    ///
+    /// # Errors
+    /// If command fails
     pub fn talk(&mut self, dc: DeviceChannel) -> Result<(), Error> {
-        self.execute_command(BusCommand::Talk(dc))
+        self.execute_command(&BusCommand::Talk(dc))
     }
 
     /// Instruct a drive to listen on the bus.
     ///
     /// # Args:
-    /// * dc: DeviceChannel - the device and channel to instruct to listen
+    /// * dc: `DeviceChannel` - the device and channel to instruct to listen
     ///
     /// # Returns
     /// * `Ok(())` - if successful
     /// * `Err(Error)` - if an error occurred
+    ///
+    /// # Errors
+    /// If command fails
     pub fn listen(&mut self, dc: DeviceChannel) -> Result<(), Error> {
-        self.execute_command(BusCommand::Listen(dc))
+        self.execute_command(&BusCommand::Listen(dc))
+    }
+
+    /// Instruct a drive to listen on the bus without a channel.  This is
+    /// strictly allowed, at least in IEEE-488, although not typically
+    /// supported by a Commodore disk drive.
+    ///
+    /// # Args:
+    /// * device: u8 - the device number to instruct to listen
+    ///
+    /// # Returns
+    /// * `Ok(())` - if successful
+    /// * `Err(Error)` - if an error occurred
+    ///
+    /// # Errors
+    /// If command fails
+    pub fn listen_no_channel(&mut self, device: u8) -> Result<(), Error> {
+        self.execute_command(&BusCommand::ListenNoChannel(device))
     }
 
     /// Instruct a drive to stop talking on the bus.
@@ -164,8 +189,11 @@ impl Bus {
     /// # Returns
     /// * `Ok(())` - if successful
     /// * `Err(Error)` - if an error occurred
+    ///
+    /// # Errors
+    /// If command fails
     pub fn untalk(&mut self) -> Result<(), Error> {
-        self.execute_command(BusCommand::Untalk)
+        self.execute_command(&BusCommand::Untalk)
     }
 
     /// Instruct a drive to stop listening on the bus.
@@ -173,33 +201,42 @@ impl Bus {
     /// # Returns
     /// * `Ok(())` - if successful
     /// * `Err(Error)` - if an error occurred
+    ///
+    /// # Errors
+    /// If command fails
     pub fn unlisten(&mut self) -> Result<(), Error> {
-        self.execute_command(BusCommand::Unlisten)
+        self.execute_command(&BusCommand::Unlisten)
     }
 
     /// Open a file on a drive and channel.
-    /// Normally followed by write(filename) and then unlisten().
+    /// Normally followed by write(filename) and then `unlisten()`.
     ///
     /// # Args:
-    /// * dc: DeviceChannel - the device and channel to open
+    /// * dc: `DeviceChannel` - the device and channel to open
     ///
     /// # Returns
     /// * `Ok(())` - if successful
     /// * `Err(Error)` - if an error occurred
+    ///
+    /// # Errors
+    /// If command fails
     pub fn open(&mut self, dc: DeviceChannel) -> Result<(), Error> {
-        self.execute_command(BusCommand::Open(dc))
+        self.execute_command(&BusCommand::Open(dc))
     }
 
     /// Close a file on a drive and channel.
     ///
     /// # Args:
-    /// * dc: DeviceChannel - the device and channel to close
+    /// * dc: `DeviceChannel` - the device and channel to close
     ///
     /// # Returns
     /// * `Ok(())` - if successful
     /// * `Err(Error)` - if an error occurred
+    ///
+    /// # Errors
+    /// If command fails
     pub fn close(&mut self, dc: DeviceChannel) -> Result<(), Error> {
-        self.execute_command(BusCommand::Close(dc))
+        self.execute_command(&BusCommand::Close(dc))
     }
 
     /// Read data from the bus (from a drive that is in talk mode).
@@ -213,6 +250,9 @@ impl Bus {
     ///
     /// # Note
     /// Will warn if bus is in listening mode when this is called.
+    ///
+    /// # Errors
+    /// If command fails
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
         trace!("Entered Bus::read buf.len(): {}", buf.len());
         Self::validate_read_params(buf, None, false)?;
@@ -222,7 +262,8 @@ impl Bus {
         self.with_retry(|device| device.read_data(PROTO_CBM, buf))
     }
 
-    /// Read data from the bus until either buf.len() bytes are read or pattern is matched.
+    /// Read data from the bus until either `buf.len()` bytes are read or
+    /// pattern is matched.
     ///
     /// # Args:
     /// * `buf` - buffer to read data into
@@ -234,7 +275,10 @@ impl Bus {
     ///
     /// # Note
     /// The pattern must not be empty and must be smaller than the buffer size.
-    pub fn read_until(&mut self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Error> {
+    ///
+    /// # Errors
+    /// If command fails
+    pub fn read_until(&mut self, buf: &mut [u8], pattern: &[u8]) -> Result<usize, Error> {
         let size = buf.len();
         trace!(
             "Bus::read_until buf.len() {size} pattern.len() {}",
@@ -253,11 +297,11 @@ impl Bus {
                     buf[total_read] = byte;
                     total_read += 1;
 
-                    if total_read >= pattern_len {
-                        if buf[total_read - pattern_len..total_read] == pattern[..] {
-                            trace!("Found pattern in read data");
-                            break;
-                        }
+                    if total_read >= pattern_len
+                        && buf[total_read - pattern_len..total_read] == pattern[..]
+                    {
+                        trace!("Found pattern in read data");
+                        break;
                     }
                 }
             }
@@ -279,7 +323,10 @@ impl Bus {
     /// # Note
     /// The pattern must not be empty and the buffer must be the size of the
     /// maximum desired read length.
-    pub fn read_until_any(&mut self, buf: &mut Vec<u8>, pattern: &[u8]) -> Result<usize, Error> {
+    ///
+    /// # Errors
+    /// If command fails
+    pub fn read_until_any(&mut self, buf: &mut [u8], pattern: &[u8]) -> Result<usize, Error> {
         let size = buf.len();
         trace!(
             "Bus::read_until_any buf.len() {size} pattern.len() {}",
@@ -317,13 +364,16 @@ impl Bus {
     ///
     /// # Note
     /// Will warn if bus is in talking mode when this is called.
+    ///
+    /// # Errors
+    /// If command fails
     pub fn write(&mut self, buf: &[u8]) -> Result<usize, Error> {
         trace!("Entered Bus::write buf.len(): {}", buf.len());
         let size = buf.len();
         if size == 0 {
             warn!("Attempt to write 0 bytes");
             return Err(Error::Args {
-                message: format!("Attempt to write 0 bytes"),
+                message: "Attempt to write 0 bytes".to_string(),
             });
         }
         if let BusMode::Talking(_) = self.mode {
@@ -336,7 +386,7 @@ impl Bus {
     /// after sending, except where the Ioctl is asyncronous
     ///
     /// # Arguments
-    /// * `ioctl` - The request_type of type [`crate::constants::Ioctl`]
+    /// * `ioctl` - The `request_type` of type [`crate::constants::Ioctl`]
     /// * `address` - The address to target with this ioctl.  May be 0.
     /// * `secondary_address` - The secondary to target with this ioctl. May be 0.
     ///
@@ -346,6 +396,9 @@ impl Bus {
     ///
     /// Note - this function may be deprecated in a future version, and replaced
     /// with specific functions for required ioctls
+    ///
+    /// # Errors
+    /// If command fails
     pub fn ioctl(
         &mut self,
         ioctl: Ioctl,
@@ -359,8 +412,11 @@ impl Bus {
     ///
     /// # Returns
     /// - `u16` - On success, a 2 byte status from the device
-    /// - `Error` - On failure, including if there is no status
-    /// response (because GetEoi is a syncronous command, hence we expect a status)
+    /// - `Error` - On failure, including if there is no status `response`
+    ///   (because `GetEoi` is a syncronous command, hence we expect a status)
+    ///
+    /// # Errors
+    /// If command fails
     pub fn get_eoi(&mut self) -> Result<u16, Error> {
         trace!("Bus::get_eoi");
         self.device
@@ -374,8 +430,11 @@ impl Bus {
     ///
     /// # Returns
     /// - `u16` - On success, a 2 byte status from the device
-    /// - `Error` - On failure, including if there is no status
-    /// response (because GetEoi is a syncronous command, hence we expect a status)
+    /// - `Error` - On failure, including if there is no status response
+    ///   (because `GetEoi` is a syncronous command, hence we expect a status)
+    ///
+    /// # Errors
+    /// If command fails
     pub fn clear_eoi(&mut self) -> Result<u16, Error> {
         trace!("Bus::clear_eoi");
         self.device
@@ -398,8 +457,11 @@ impl Bus {
     /// # Returns
     /// `Ok(u16)` - the 2 byte status value from the device
     /// `Err(Error)` - the error on failure
+    ///
+    /// # Errors
+    /// If command fails
     pub fn wait_for_status(&mut self) -> Result<u16, Error> {
-        self.with_retry(|device| device.wait_for_status())
+        self.with_retry(super::device::DeviceType::wait_for_status)
     }
 
     /// Retrieve information about the underlying device.
@@ -426,6 +488,7 @@ impl Bus {
     ///
     /// # Returns
     /// * `Option<&DeviceChannel>` - the device and channel if in listening mode, None otherwise
+    #[must_use]
     pub fn is_listening(&self) -> Option<&DeviceChannel> {
         match &self.mode {
             BusMode::Listening(dev) => Some(dev),
@@ -437,6 +500,7 @@ impl Bus {
     ///
     /// # Returns
     /// * `Option<&DeviceChannel>` - the device and channel if in talking mode, None otherwise
+    #[must_use]
     pub fn is_talking(&self) -> Option<&DeviceChannel> {
         match &self.mode {
             BusMode::Talking(dev) => Some(dev),
@@ -483,7 +547,7 @@ impl Bus {
         check_pattern_size: bool,
     ) -> Result<(), Error> {
         let size = buf.len();
-        let pattern_len = pattern.map(|p| p.len());
+        let pattern_len = pattern.map(<[u8]>::len);
         trace!("Bus::validate_read_params buf.len(): {size} pattern_len: {pattern_len:?} check_pattern_size: {check_pattern_size}");
 
         if size == 0 {
@@ -512,7 +576,7 @@ impl Bus {
     /// Execute a command on the IEC/IEEE-488 bus and update the bus state.
     ///
     /// # Args:
-    /// * command: BusCommand - the command to execute (Talk, Listen, Open, Close, etc.)
+    /// * command: `BusCommand` - the command to execute (Talk, Listen, Open, Close, etc.)
     ///
     /// # Returns:
     /// * `Ok(())` - if command executed successfully
@@ -524,7 +588,7 @@ impl Bus {
     ///   * Open/Listen -> Listening mode
     ///   * Talk -> Talking mode
     ///   * Close/Unlisten/Untalk -> Idle mode
-    fn execute_command(&mut self, command: BusCommand) -> Result<(), Error> {
+    fn execute_command(&mut self, command: &BusCommand) -> Result<(), Error> {
         trace!(
             "Entered Bus::execute_command command {command} bus in mode {}",
             self.mode
@@ -541,7 +605,7 @@ impl Bus {
                 // An open is followed by a write for the filename followed
                 // an unlisten.  Hence we consider an open to put the bus into
                 // listen mode.
-                self.mode = BusMode::Listening(dc);
+                self.mode = BusMode::Listening(*dc);
             }
             BusCommand::Close(_) => {
                 if self.mode != BusMode::Idle {
@@ -556,7 +620,18 @@ impl Bus {
                 }
 
                 // Ths bus is now Listening
-                self.mode = BusMode::Listening(dc);
+                self.mode = BusMode::Listening(*dc);
+            }
+            BusCommand::ListenNoChannel(dc) => {
+                if self.mode != BusMode::Idle {
+                    warn!("ListenNoChannel called when bus was in state {}", self.mode);
+                }
+
+                // Ths bus is now Listening
+                // Strictly we should handle the lack of a channel better, but
+                // that requires interface breaking change to DeviceChannel to
+                // allow a None channel.
+                self.mode = BusMode::Listening(DeviceChannel::new(*dc, 0).unwrap());
             }
             BusCommand::Unlisten => {
                 if let BusMode::Listening(_) = self.mode {
@@ -574,7 +649,7 @@ impl Bus {
                 }
 
                 // Ths bus is now Talking
-                self.mode = BusMode::Talking(dc);
+                self.mode = BusMode::Talking(*dc);
             }
             BusCommand::Untalk => {
                 if let BusMode::Talking(_) = self.mode {
@@ -627,35 +702,34 @@ impl Bus {
     ) -> Result<T, Error> {
         match f(&mut self.device) {
             Ok(result) => Ok(result),
-            Err(e) => {
-                match e.clone() {
-                    Error::DeviceAccess { kind } => match kind {
-                        DeviceAccessError::NoDevice
-                        | DeviceAccessError::Permission
-                        | DeviceAccessError::NetworkConnection { .. } => {
-                            self.attempt_device_recovery(e.clone())?;
-                            info!("Device successfully recovered after error {}", e);
-                            f(&mut self.device)
-                        }
-                        _ => {
-                            warn!("Fatal device error - not retrying due to error type ({e})");
-                            Err(e)
-                        }
-                    },
-                    e => {
+            Err(e) => match e.clone() {
+                Error::DeviceAccess { kind } => match kind {
+                    DeviceAccessError::NoDevice
+                    | DeviceAccessError::Permission
+                    | DeviceAccessError::NetworkConnection { .. } => {
+                        self.attempt_device_recovery(e.clone())?;
+                        info!("Device successfully recovered after error {}", e);
+                        f(&mut self.device)
+                    }
+                    _ => {
                         warn!("Fatal device error - not retrying due to error type ({e})");
                         Err(e)
                     }
+                },
+                e => {
+                    warn!("Fatal device error - not retrying due to error type ({e})");
+                    Err(e)
                 }
-            }
+            },
         }
     }
 
     fn initialize_retry(&mut self, retry: bool) -> Result<(), Error> {
         trace!("Bus::initialize");
-        match retry {
-            true => self.with_retry(|device| device.init())?,
-            false => self.device.init()?,
+        if retry {
+            self.with_retry(super::device::DeviceType::init)?;
+        } else {
+            self.device.init()?;
         }
         let info = self.device.info(); // Can't fail, don't retry
         if let Some(info) = info {
@@ -673,8 +747,8 @@ impl Bus {
             DeviceType::RemoteUsb(device) => {
                 let remote_addr = device.get_remote_addr();
                 DeviceType::new(DeviceConfig::RemoteUsb(RemoteUsbDeviceConfig {
-                    remote_addr,
                     serial_num,
+                    remote_addr,
                 }))
             }
         }
@@ -693,13 +767,14 @@ impl Bus {
         // First of all we try and recover using the current serial number.
         // If there isn't a serial number and we're in All mode, that's OK.
         let serial = match &self.serial {
-            None => match self.auto_recover {
-                BusRecoveryType::All => None,
-                _ => {
+            None => {
+                if self.auto_recover == BusRecoveryType::All {
+                    None
+                } else {
                     warn!("Auto-recovery of device requested, but we didn't have the device's serial bumber");
                     return Err(error);
                 }
-            },
+            }
             Some(serial_string) => match serial_string.parse::<u8>() {
                 Ok(num) => Some(num),
                 Err(e) => {
